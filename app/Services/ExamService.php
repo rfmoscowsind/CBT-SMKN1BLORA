@@ -37,6 +37,11 @@ class ExamService
     /**
      * Mulai ujian untuk seorang siswa.
      *
+     * FIX #1 (issuegpt.md): Seluruh pembuatan sesi di-wrap dalam DB::transaction()
+     * + lockForUpdate() untuk mencegah race condition saat siswa double-click,
+     * browser retry, atau request paralel masuk bersamaan.
+     * Unique index (user_id, jadwal_ujian_id) tetap sebagai safety net DB level.
+     *
      * FIX (Issue #7): Batch-query semua opsi sekaligus, lalu batch-insert ke sesi_ujian_soals.
      * Sebelum: 50 soal = 50 SELECT + 50 INSERT = 100 query.
      * Sesudah: 1 SELECT opsi + 1 batch INSERT = 2 query tambahan.
@@ -68,74 +73,80 @@ class ExamService
             'Kelas tidak terdaftar.'
         );
 
-        // Jika sesi sudah ada (login ulang), kembalikan sesi yang ada
-        $existing = DB::table('sesi_ujians')
-            ->where(['user_id' => $user->id, 'jadwal_ujian_id' => $j->id])
-            ->first();
-        if ($existing) {
-            $this->event($existing->id, 'login_return', ['ip' => $ip, 'user_agent' => $ua]);
-            return $existing;
-        }
+        // FIX #1: Wrap dalam transaction + lockForUpdate untuk mencegah race condition.
+        return DB::transaction(function () use ($user, $j, $ip, $ua) {
+            // Cek ulang di dalam transaksi dengan row-level lock
+            $existing = DB::table('sesi_ujians')
+                ->where('user_id', $user->id)
+                ->where('jadwal_ujian_id', $j->id)
+                ->lockForUpdate()
+                ->first();
 
-        // Buat sesi baru
-        $sessionId = DB::table('sesi_ujians')->insertGetId([
-            'user_id'         => $user->id,
-            'jadwal_ujian_id' => $j->id,
-            'waktu_login'     => now(),
-            'status'          => 'aktif',
-            'ip_address'      => $ip,
-            'device_info'     => json_encode(['user_agent' => $ua]),
-            'last_seen_at'    => now(),
-            'created_at'      => now(),
-            'updated_at'      => now(),
-        ]);
-
-        // Ambil ID soal dari paket
-        $soalIds = DB::table('jadwal_ujians as j')
-            ->join('master_ujians as m', 'm.id', '=', 'j.master_ujian_id')
-            ->join('bank_soals as b', 'b.paket_soal_id', '=', 'm.paket_soal_id')
-            ->where('j.id', $j->id)
-            ->orderBy('b.urutan')
-            ->pluck('b.id')
-            ->all();
-
-        $master = DB::table('jadwal_ujians as j')
-            ->join('master_ujians as m', 'm.id', '=', 'j.master_ujian_id')
-            ->where('j.id', $j->id)
-            ->first();
-
-        if ($master->acak_soal) {
-            shuffle($soalIds);
-        }
-
-        // FIX #7: Batch-fetch semua opsi sekaligus — 1 query, bukan N queries
-        $allOptions = DB::table('opsi_jawabans')
-            ->whereIn('bank_soal_id', $soalIds)
-            ->get(['id', 'bank_soal_id'])
-            ->groupBy('bank_soal_id');
-
-        // FIX #7: Siapkan semua row lalu batch-insert — 1 INSERT, bukan N INSERT
-        $rows = [];
-        foreach ($soalIds as $i => $soalId) {
-            $opsi = $allOptions->get($soalId, collect())->pluck('id')->toArray();
-            if ($master->acak_opsi) {
-                shuffle($opsi);
+            if ($existing) {
+                $this->event($existing->id, 'login_return', ['ip' => $ip, 'user_agent' => $ua]);
+                return $existing;
             }
-            $rows[] = [
-                'sesi_ujian_id' => $sessionId,
-                'bank_soal_id'  => $soalId,
-                'nomor_soal'    => $i + 1,
-                'opsi_order'    => json_encode($opsi),
-            ];
-        }
 
-        if (!empty($rows)) {
-            DB::table('sesi_ujian_soals')->insert($rows);
-        }
+            // Buat sesi baru (aman dari duplikat karena sudah di dalam lock)
+            $sessionId = DB::table('sesi_ujians')->insertGetId([
+                'user_id'         => $user->id,
+                'jadwal_ujian_id' => $j->id,
+                'waktu_login'     => now(),
+                'status'          => 'aktif',
+                'ip_address'      => $ip,
+                'device_info'     => json_encode(['user_agent' => $ua]),
+                'last_seen_at'    => now(),
+                'created_at'      => now(),
+                'updated_at'      => now(),
+            ]);
 
-        $this->event($sessionId, 'login', ['ip' => $ip, 'user_agent' => $ua]);
+            // Ambil ID soal dari paket
+            $soalIds = DB::table('jadwal_ujians as j')
+                ->join('master_ujians as m', 'm.id', '=', 'j.master_ujian_id')
+                ->join('bank_soals as b', 'b.paket_soal_id', '=', 'm.paket_soal_id')
+                ->where('j.id', $j->id)
+                ->orderBy('b.urutan')
+                ->pluck('b.id')
+                ->all();
 
-        return DB::table('sesi_ujians')->find($sessionId);
+            $master = DB::table('jadwal_ujians as j')
+                ->join('master_ujians as m', 'm.id', '=', 'j.master_ujian_id')
+                ->where('j.id', $j->id)
+                ->first();
+
+            if ($master->acak_soal) {
+                shuffle($soalIds);
+            }
+
+            // Batch-fetch semua opsi sekaligus — 1 query, bukan N queries
+            $allOptions = DB::table('opsi_jawabans')
+                ->whereIn('bank_soal_id', $soalIds)
+                ->get(['id', 'bank_soal_id'])
+                ->groupBy('bank_soal_id');
+
+            // Siapkan semua row lalu batch-insert — 1 INSERT, bukan N INSERT
+            $rows = [];
+            foreach ($soalIds as $i => $soalId) {
+                $opsi = $allOptions->get($soalId, collect())->pluck('id')->toArray();
+                if ($master->acak_opsi) {
+                    shuffle($opsi);
+                }
+                $rows[] = [
+                    'sesi_ujian_id' => $sessionId,
+                    'bank_soal_id'  => $soalId,
+                    'nomor_soal'    => $i + 1,
+                    'opsi_order'    => json_encode($opsi),
+                ];
+            }
+
+            if (!empty($rows)) {
+                DB::table('sesi_ujian_soals')->insert($rows);
+            }
+
+            $this->event($sessionId, 'login', ['ip' => $ip, 'user_agent' => $ua]);
+
+            return DB::table('sesi_ujians')->find($sessionId);
+        });
     }
 
     /**
@@ -430,28 +441,44 @@ class ExamService
 
     /**
      * Submit (selesaikan) sesi ujian.
+     *
+     * FIX #4 (issuegpt.md): Wrap dalam DB::transaction() + lockForUpdate() untuk
+     * mencegah double-submit saat: siswa klik selesai + auto-submit waktu habis terjadi
+     * bersamaan, browser retry, atau request lain yang memicu ownedSession().
      */
     public function submit(object $s): object
     {
-        if ($s->status !== 'aktif') {
-            return $s;
-        }
+        return DB::transaction(function () use ($s) {
+            $session = DB::table('sesi_ujians')
+                ->where('id', $s->id)
+                ->lockForUpdate()
+                ->first();
 
-        $this->flushAll($s->id);
+            // Jika tidak ditemukan atau sudah selesai, tidak perlu proses ulang
+            if (!$session || $session->status !== 'aktif') {
+                return $session ?: $s;
+            }
 
-        $score = DB::table('jawaban_siswas')
-            ->where('sesi_ujian_id', $s->id)
-            ->sum('skor');
+            $this->flushAll($session->id);
 
-        DB::table('sesi_ujians')->where('id', $s->id)->update([
-            'status'       => 'selesai',
-            'waktu_submit' => now(),
-            'nilai_akhir'  => $score,
-            'updated_at'   => now(),
-        ]);
+            $score = DB::table('jawaban_siswas')
+                ->where('sesi_ujian_id', $session->id)
+                ->sum('skor');
 
-        $this->event($s->id, 'submit');
+            // Tambah kondisi WHERE status='aktif' agar aman dari update ganda
+            DB::table('sesi_ujians')
+                ->where('id', $session->id)
+                ->where('status', 'aktif')
+                ->update([
+                    'status'       => 'selesai',
+                    'waktu_submit' => now(),
+                    'nilai_akhir'  => $score,
+                    'updated_at'   => now(),
+                ]);
 
-        return DB::table('sesi_ujians')->find($s->id);
+            $this->event($session->id, 'submit');
+
+            return DB::table('sesi_ujians')->find($session->id);
+        });
     }
 }

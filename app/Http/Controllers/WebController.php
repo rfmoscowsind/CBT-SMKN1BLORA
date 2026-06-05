@@ -250,7 +250,24 @@ class WebController extends Controller
     public function ping(Request $request, string $id)
     {
         $session = $this->ownedSession($id, $request);
-        DB::table('sesi_ujians')->where('id', $session->id)->update(['last_seen_at' => now(), 'updated_at' => now()]);
+
+        // FIX #7 (Issue issuegpt.md): Pindahkan heartbeat ke Redis untuk mengurangi
+        // write load DB. Dengan 1500 siswa ping setiap 10 detik = ~150 write/detik ke DB.
+        // Solusi: status "online" disimpan di Redis (TTL 45 detik).
+        // DB last_seen_at hanya diupdate tiap 60 detik (rate-limit via Redis key).
+        $redisKey     = "cbt:session:online:{$session->id}";
+        $dbThrottleKey = "cbt:ping:db:{$session->id}";
+
+        // Tandai online di Redis (45 detik TTL)
+        Redis::setex($redisKey, 45, now()->timestamp);
+
+        // Update DB last_seen_at hanya jika belum ada key throttle (max 1x per 60 detik)
+        if (!Redis::exists($dbThrottleKey)) {
+            DB::table('sesi_ujians')
+                ->where('id', $session->id)
+                ->update(['last_seen_at' => now(), 'updated_at' => now()]);
+            Redis::setex($dbThrottleKey, 60, 1);
+        }
 
         return response()->json(['success' => true, 'sisa_detik' => $this->exams->remaining($session)]);
     }
