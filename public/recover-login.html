@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Memulihkan Login CBT</title>
+    <style>
+        body { display:grid; min-height:100vh; margin:0; place-items:center; background:#f1f5f9; color:#1e3a8a; font-family:Arial,sans-serif; text-align:center }
+        main { padding:24px }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Memulihkan Login CBT</h1>
+    <p>Cache aplikasi lama sedang dibersihkan. Halaman login akan terbuka otomatis.</p>
+</main>
+<script>
+Promise.all([
+    'caches' in window
+        ? caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+        : Promise.resolve(),
+    'serviceWorker' in navigator
+        ? navigator.serviceWorker.getRegistrations().then((items) => Promise.all(items.map((item) => item.unregister())))
+        : Promise.resolve(),
+]).finally(() => {
+    window.location.replace('/login?recover=' + Date.now());
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+server CBT utama
+host : 192.168.16.120
+port :  22
+username : agent
+password : dakota775
+
+server DB Primary
+host : 192.168.16.121
+port :  22
+username : agent
+password : dakota775
+
+server hot standby
+host : 192.168.16.122
+port :  22
+username : agent
+password : dakota775

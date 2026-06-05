@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SuperAdmin Dashboard - CBT SMKN 1 Blora</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #f1f5f9;
+            overflow-x: hidden;
+            margin: 0; /* Reset margin */
+        }
+
+        /* Layout Structure */
+        #wrapper {
+            display: flex;
+            width: 100vw;
+            min-height: 100vh;
+        }
+
+        /* Sidebar Styling */
+        .sidebar {
+            width: 280px;
+            background-color: #111827; 
+            color: #f8fafc;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s;
+            z-index: 1030;
+        }
+        .sidebar-brand {
+            padding: 1.5rem;
+            background-color: #0f172a;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid #1e293b;
+        }
+        .sidebar-brand img { width: 40px; margin-right: 15px; }
+        .sidebar-nav { padding: 1rem 0; flex-grow: 1; }
+        .nav-item-custom {
+            padding: 0.8rem 1.5rem;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+            transition: all 0.2s;
+            border-left: 4px solid transparent;
+        }
+        .nav-item-custom:hover {
+            color: #f8fafc;
+            background-color: #1e293b;
+        }
+        .nav-item-custom.active {
+            color: #60a5fa;
+            background-color: #1e293b;
+            border-left: 4px solid #3b82f6;
+            font-weight: 600;
+        }
+        .nav-item-custom i { width: 25px; font-size: 1.1rem; }
+
+        /* Main Content */
+        .main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+        
+        /* Top Navbar */
+        .top-navbar {
+            background-color: #ffffff;
+            height: 70px;
+            padding: 0 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+            position: sticky;
+            top: 0;
+            z-index: 1020;
+        }
+
+        /* Cards & Stats */
+        .stat-card {
+            background: #fff;
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+            padding: 1.5rem;
+            display: flex;
+            align-items: center;
+        }
+        .stat-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            margin-right: 1.2rem;
+        }
+        
+        /* Specific Icon Colors */
+        .icon-blue { background-color: #eff6ff; color: #3b82f6; }
+        .icon-green { background-color: #f0fdf4; color: #22c55e; }
+        .icon-purple { background-color: #faf5ff; color: #a855f7; }
+        .icon-red { background-color: #fef2f2; color: #ef4444; }
+
+        /* Table Dashboard */
+        .table-card {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+            border: none;
+        }
+        .table-custom thead th {
+            background-color: #f8fafc;
+            color: #475569;
+            font-weight: 600;
+            border-bottom: 2px solid #e2e8f0;
+            padding: 1rem;
+        }
+        .table-custom tbody td {
+            padding: 1rem;
+            vertical-align: middle;
+            color: #334155;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        
+        /* Live Indicator Badge */
+        .live-badge {
+            background-color: #fee2e2;
+            color: #dc2626;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid #fca5a5;
+        }
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #dc2626;
+            border-radius: 50%;
+            margin-right: 6px;
+            animation: pulse 1.5s infinite;
+        }
+
+        /* Score Flash Animation */
+        @keyframes scoreUpdate {
+            0% { background-color: transparent; }
+            50% { background-color: #dcfce7; }
+            100% { background-color: transparent; }
+        }
+        .score-updated {
+            animation: scoreUpdate 1.5s ease;
+        }
+        .score-cell {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #1e3a8a;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
+            70% { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+        }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <div id="wrapper">
+        
+        <div class="sidebar">
+            <div class="sidebar-brand">
+                <img src="https://smkn1blora.sch.id/media_library/images/585485ba3fba364ffb5b5ed38d8c4f33.png" alt="Logo">
+                <div>
+                    <div class="fw-bold fs-6 text-white">SMKN 1 BLORA</div>
+                    <div style="font-size: 0.7rem; color: #94a3b8;">CBT Enterprise Server</div>
+                </div>
+            </div>
+            
+            <div class="sidebar-nav">
+                <div class="px-4 text-uppercase fw-bold mb-2 mt-2" style="font-size: 0.7rem; color: #475569;">Menu Utama</div>
+                <a href="#" class="nav-item-custom active"><i class="fa-solid fa-chart-pie"></i> Dashboard</a>
+                
+                <div class="px-4 text-uppercase fw-bold mb-2 mt-4" style="font-size: 0.7rem; color: #475569;">Hak Akses SuperAdmin</div>
+                <a href="#" class="nav-item-custom"><i class="fa-solid fa-users-gear"></i> Manajemen Staff</a>
+                <a href="#" class="nav-item-custom"><i class="fa-solid fa-server"></i> Status Server & DB</a>
+                
+                <div class="px-4 text-uppercase fw-bold mb-2 mt-4" style="font-size: 0.7rem; color: #475569;">Manajemen Ujian</div>
+                <a href="#" class="nav-item-custom"><i class="fa-solid fa-file-circle-check"></i> Bank Soal</a>
+                <a href="#" class="nav-item-custom"><i class="fa-solid fa-calendar-days"></i> Jadwal Ujian</a>
+                <a href="#" class="nav-item-custom"><i class="fa-solid fa-users-viewfinder"></i> Manajemen Siswa</a>
+            </div>
+            
+            <div class="p-3 border-top" style="border-color: #1e293b !important;">
+                <div class="d-flex align-items-center">
+                    <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center text-white me-2" style="width: 35px; height: 35px;">
+                        <i class="fa-solid fa-user-shield"></i>
+                    </div>
+                    <div class="small">
+                        <div class="text-white fw-bold">Root Admin</div>
+                        <div style="font-size: 0.7rem; color: #94a3b8;">SuperAdmin Role</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content bg-light">
+            
+            <div class="top-navbar">
+                <div class="d-flex align-items-center">
+                    <h5 class="mb-0 fw-bold text-dark me-3">System Overview</h5>
+                    <span class="badge bg-primary rounded-pill bg-opacity-10 text-primary border border-primary px-3">
+                        <i class="fa-solid fa-network-wired me-1"></i> Mode: Baremetal P2P
+                    </span>
+                </div>
+                <div>
+                    <button class="btn btn-light border rounded-circle me-2 position-relative">
+                        <i class="fa-regular fa-bell"></i>
+                        <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle"></span>
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm px-3" @click="logout">
+                        <i class="fa-solid fa-power-off me-1"></i> Logout
+                    </button>
+                </div>
+            </div>
+
+            <div class="container-fluid p-4">
+                
+                <div class="row g-4 mb-4">
+                    <div class="col-12 col-md-6 col-lg-3">
+                        <div class="stat-card">
+                            <div class="stat-icon icon-blue"><i class="fa-solid fa-users"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase">Total Siswa (DKV)</div>
+                                <div class="fs-4 fw-bold text-dark">420</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-lg-3">
+                        <div class="stat-card">
+                            <div class="stat-icon icon-green"><i class="fa-solid fa-laptop-file"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase">Ujian Berlangsung</div>
+                                <div class="fs-4 fw-bold text-dark">2</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-lg-3">
+                        <div class="stat-card">
+                            <div class="stat-icon icon-purple"><i class="fa-solid fa-user-check"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase">Peserta Aktif Login</div>
+                                <div class="fs-4 fw-bold text-dark">142 / 150</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-lg-3">
+                        <div class="stat-card">
+                            <div class="stat-icon icon-red"><i class="fa-solid fa-memory"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase">Redis Memory Load</div>
+                                <div class="fs-4 fw-bold text-dark">24%</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-12">
+                        <div class="table-card p-4">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <div>
+                                    <h5 class="fw-bold text-dark mb-1">Radar Nilai Real-Time (SuperAdmin Only)</h5>
+                                    <p class="text-muted small mb-0">Menarik data dari Redis worker setiap detik. Tidak membebani PostgreSQL utama.</p>
+                                </div>
+                                <div class="live-badge">
+                                    <span class="live-dot"></span> LIVE UPDATE
+                                </div>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-custom table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th width="5%">No</th>
+                                            <th width="25%">Nama Peserta</th>
+                                            <th width="15%">Kelas</th>
+                                            <th width="15%">Status Gawai</th>
+                                            <th width="20%">Progress Pengerjaan</th>
+                                            <th width="20%">Live Score (PG)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(peserta, index) in radarPeserta" :key="peserta.id">
+                                            <td>{{ index + 1 }}</td>
+                                            <td class="fw-semibold">{{ peserta.nama }}</td>
+                                            <td>{{ peserta.kelas }}</td>
+                                            <td>
+                                                <span v-if="peserta.status === 'Online'" class="badge bg-success bg-opacity-10 text-success border border-success px-2 py-1">
+                                                    <i class="fa-solid fa-circle text-success" style="font-size: 0.5rem; vertical-align: middle; margin-right: 3px;"></i> Online
+                                                </span>
+                                                <span v-else class="badge bg-danger bg-opacity-10 text-danger border border-danger px-2 py-1">
+                                                    <i class="fa-solid fa-triangle-exclamation me-1"></i> Terputus
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div class="d-flex align-items-center">
+                                                    <span class="me-2 text-dark fw-semibold">{{ peserta.progress }} / 40</span>
+                                                    <div class="progress flex-grow-1" style="height: 6px;">
+                                                        <div class="progress-bar bg-primary" :style="{ width: (peserta.progress / 40 * 100) + '%' }"></div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td class="score-cell rounded" :class="{ 'score-updated': peserta.isUpdated }">
+                                                {{ peserta.score.toFixed(2) }}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+
+<script>
+    const { createApp, ref, onMounted, onUnmounted } = Vue;
+
+    createApp({
+        setup() {
+            // Data Dummy yang merepresentasikan antrean Redis Live Score
+            const radarPeserta = ref([
+                { id: 101, nama: 'Aditya Pratama', kelas: '10 DKV 1', status: 'Online', progress: 15, score: 35.00, isUpdated: false },
+                { id: 102, nama: 'Bunga Lestari', kelas: '10 DKV 1', status: 'Online', progress: 28, score: 65.50, isUpdated: false },
+                { id: 103, nama: 'Candra Wijaya', kelas: '10 DKV 2', status: 'Offline', progress: 10, score: 20.00, isUpdated: false },
+                { id: 104, nama: 'Dinda Permata', kelas: '10 DKV 2', status: 'Online', progress: 39, score: 92.50, isUpdated: false },
+                { id: 105, nama: 'Eko Supriyanto', kelas: '10 DKV 3', status: 'Online', progress: 22, score: 48.00, isUpdated: false }
+            ]);
+
+            let intervalSimulator = null;
+
+            // FUNGSI SIMULASI: Seolah-olah worker Node.js/Redis mengirim data update ke frontend via Websocket/Polling
+            const simulateRedisUpdates = () => {
+                intervalSimulator = setInterval(() => {
+                    // Pilih 1 atau 2 anak secara acak yang nilainya bertambah (sedang ngerjain)
+                    const randomIndex = Math.floor(Math.random() * radarPeserta.value.length);
+                    const peserta = radarPeserta.value[randomIndex];
+
+                    // Hanya yg online dan progressnya belum 40 yang di-update
+                    if (peserta.status === 'Online' && peserta.progress < 40) {
+                        peserta.progress += 1;
+                        const isCorrect = Math.random() > 0.3; // 70% chance benar
+                        if (isCorrect) {
+                            peserta.score += 2.5; // Misal bobot soal 2.5
+                        }
+                        
+                        peserta.isUpdated = true;
+                        setTimeout(() => {
+                            peserta.isUpdated = false;
+                        }, 1500);
+                    }
+                }, 2500); // Tiap 2.5 detik ada jawaban masuk
+            };
+
+            const logout = () => {
+                Swal.fire({
+                    title: 'Keluar Sistem?',
+                    text: "Sesi SuperAdmin Anda akan ditutup.",
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonColor: '#d33',
+                    cancelButtonColor: '#3085d6',
+                    confirmButtonText: 'Ya, Logout',
+                    cancelButtonText: 'Batal'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        console.log('Logging out...');
+                    }
+                })
+            };
+
+            onMounted(() => {
+                simulateRedisUpdates();
+            });
+
+            onUnmounted(() => {
+                clearInterval(intervalSimulator);
+            });
+
+            return {
+                radarPeserta,
+                logout
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
