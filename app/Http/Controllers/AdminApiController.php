@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Spatie\Permission\Models\Permission;
@@ -110,6 +111,11 @@ class AdminApiController extends Controller
     {
         $this->permission('manage-users', ['SuperAdmin', 'Admin']);
         abort_if((int) Auth::guard('api')->id() === $id, 422, 'Akun sendiri tidak dapat dihapus.');
+        abort_if(
+            DB::table('sesi_ujians')->where('user_id', $id)->exists(),
+            422,
+            'User sudah memiliki riwayat ujian. Nonaktifkan aksesnya, jangan hapus histori.'
+        );
         DB::table('users')->where('id', $id)->delete();
 
         return $this->ok();
@@ -197,8 +203,9 @@ class AdminApiController extends Controller
     public function bulkStudents(Request $request): JsonResponse
     {
         $this->permission('manage-users', ['SuperAdmin', 'Admin']);
-        $request->validate(['file' => ['required', 'file']]);
+        $request->validate(['file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:2048']]);
         $rows = IOFactory::load($request->file('file')->getRealPath())->getActiveSheet()->toArray();
+        abort_if(count($rows) > 2001, 422, 'Maksimal 2000 baris per import.');
         $imported = 0;
         foreach (array_slice($rows, 1) as $row) {
             $username = trim((string) ($row[0] ?? ''));
@@ -404,12 +411,24 @@ class AdminApiController extends Controller
     public function resetSession(int $id): JsonResponse
     {
         $this->permission('monitor-exams', ['SuperAdmin', 'Admin', 'Pengawas']);
-        $session = DB::table('sesi_ujians')->find($id);
-        abort_unless($session, 404);
-        $this->clearDeviceAccessForUser((int) $session->user_id, Auth::guard('api')->id(), 'api_session_reset');
-        DB::table('sesi_ujians')->where('id', $id)->delete();
+        DB::transaction(function () use ($id) {
+            $session = DB::table('sesi_ujians')->where('id', $id)->lockForUpdate()->first();
+            abort_unless($session, 404);
 
-        return $this->ok(['message' => 'Sesi berhasil dihapus dan gawai sudah direset.']);
+            $this->clearDeviceAccessForUser((int) $session->user_id, Auth::guard('api')->id(), 'api_session_reset');
+            Redis::del("queue_jawaban:$id");
+            DB::table('jawaban_siswas')->where('sesi_ujian_id', $id)->delete();
+            DB::table('sesi_ujian_soals')->where('sesi_ujian_id', $id)->delete();
+            DB::table('sesi_ujians')->where('id', $id)->update([
+                'status' => 'reset',
+                'waktu_submit' => null,
+                'nilai_akhir' => null,
+                'last_seen_at' => null,
+                'updated_at' => now(),
+            ]);
+        });
+
+        return $this->ok(['message' => 'Sesi berhasil direset dan antrean jawaban Redis dibersihkan.']);
     }
 
     public function report(int $jadwal, string $format = 'json')

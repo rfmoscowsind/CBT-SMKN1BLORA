@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\HandlesDeviceFingerprints;
 use App\Models\User;
+use App\Services\ExamService;
 use App\Services\ImageService;
 use App\Services\ReportService;
 use Illuminate\Http\JsonResponse;
@@ -11,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -21,7 +23,7 @@ class ManageController extends Controller
 {
     use HandlesDeviceFingerprints;
 
-    public function __construct(private ReportService $reports, private ImageService $images)
+    public function __construct(private ReportService $reports, private ImageService $images, private ExamService $exams)
     {
     }
 
@@ -182,6 +184,11 @@ class ManageController extends Controller
     {
         $this->authorizePermission('manage-users', ['SuperAdmin', 'Admin']);
         abort_if((int) Auth::id() === $id, 422, 'Akun sendiri tidak dapat dihapus.');
+        abort_if(
+            DB::table('sesi_ujians')->where('user_id', $id)->exists(),
+            422,
+            'User sudah memiliki riwayat ujian. Nonaktifkan aksesnya, jangan hapus histori.'
+        );
         DB::table('users')->where('id', $id)->delete();
 
         return $this->done($request, 'User dihapus.');
@@ -221,8 +228,9 @@ class ManageController extends Controller
     public function bulk(Request $request)
     {
         $this->authorizePermission('manage-users', ['SuperAdmin', 'Admin']);
-        $request->validate(['file' => ['required', 'file']]);
+        $request->validate(['file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:2048']]);
         $rows = $this->spreadsheetRows($request->file('file')->getRealPath());
+        abort_if(count($rows) > 2001, 422, 'Maksimal 2000 baris per import.');
         $imported = 0;
         foreach (array_slice($rows, 1) as $row) {
             $username = trim((string) ($row[0] ?? ''));
@@ -279,9 +287,10 @@ class ManageController extends Controller
     public function importQuestions(Request $request, int $id)
     {
         $this->authorizePermission('manage-questions', ['SuperAdmin', 'Guru']);
-        $request->validate(['file' => ['required', 'file']]);
+        $request->validate(['file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:2048']]);
         abort_unless(DB::table('paket_soals')->where('id', $id)->exists(), 404);
         $rows = $this->spreadsheetRows($request->file('file')->getRealPath());
+        abort_if(count($rows) > 2001, 422, 'Maksimal 2000 baris per import.');
         $imported = 0;
         foreach (array_slice($rows, 1) as $row) {
             $type = strtoupper(trim((string) ($row[0] ?? '')));
@@ -356,9 +365,21 @@ class ManageController extends Controller
         $this->authorizePermission('manage-questions', ['SuperAdmin', 'Guru']);
         $questions = DB::table('bank_soals')->where('paket_soal_id', $id)->get();
         abort_if($questions->isEmpty(), 422, 'Paket harus memiliki minimal satu soal.');
+        $options = DB::table('opsi_jawabans')
+            ->whereIn('bank_soal_id', $questions->pluck('id'))
+            ->get(['bank_soal_id', 'teks_opsi', 'is_benar'])
+            ->groupBy('bank_soal_id');
+
         foreach ($questions as $question) {
+            abort_if(trim((string) $question->pertanyaan) === '', 422, 'Pertanyaan tidak boleh kosong.');
+            abort_if(str_starts_with((string) $question->pertanyaan, 'Pertanyaan soal nomor'), 422, 'Masih ada soal placeholder.');
+            abort_if((float) $question->bobot_nilai <= 0, 422, 'Bobot soal harus lebih dari 0.');
+
             if ($question->tipe_soal === 'PG') {
-                abort_unless(DB::table('opsi_jawabans')->where(['bank_soal_id' => $question->id, 'is_benar' => true])->count() === 1, 422, 'Soal PG harus memiliki tepat satu kunci.');
+                $opts = $options->get($question->id, collect());
+                abort_if($opts->count() < 2, 422, 'Soal PG minimal memiliki dua opsi.');
+                abort_if($opts->contains(fn ($opt) => trim((string) $opt->teks_opsi) === ''), 422, 'Teks opsi tidak boleh kosong.');
+                abort_unless($opts->where('is_benar', true)->count() === 1, 422, 'Soal PG harus memiliki tepat satu kunci.');
             }
         }
         DB::table('paket_soals')->where('id', $id)->update(['status' => 'ready', 'updated_at' => now()]);
@@ -427,12 +448,24 @@ class ManageController extends Controller
     public function resetSession(Request $request, int $id)
     {
         $this->authorizePermission('monitor-exams', ['SuperAdmin', 'Admin', 'Pengawas']);
-        $session = DB::table('sesi_ujians')->find($id);
-        abort_unless($session, 404);
-        $this->clearDeviceAccessForUser((int) $session->user_id, Auth::id(), 'session_reset');
-        DB::table('sesi_ujians')->where('id', $id)->delete();
+        DB::transaction(function () use ($id) {
+            $session = DB::table('sesi_ujians')->where('id', $id)->lockForUpdate()->first();
+            abort_unless($session, 404);
 
-        return response()->json(['success' => true, 'message' => 'Sesi berhasil dihapus dan gawai sudah direset.']);
+            $this->clearDeviceAccessForUser((int) $session->user_id, Auth::id(), 'session_reset');
+            Redis::del("queue_jawaban:$id");
+            DB::table('jawaban_siswas')->where('sesi_ujian_id', $id)->delete();
+            DB::table('sesi_ujian_soals')->where('sesi_ujian_id', $id)->delete();
+            DB::table('sesi_ujians')->where('id', $id)->update([
+                'status' => 'reset',
+                'waktu_submit' => null,
+                'nilai_akhir' => null,
+                'last_seen_at' => null,
+                'updated_at' => now(),
+            ]);
+        });
+
+        return response()->json(['success' => true, 'message' => 'Sesi berhasil direset dan antrean jawaban Redis dibersihkan.']);
     }
 
     public function report(int $id, string $format)
@@ -454,6 +487,11 @@ class ManageController extends Controller
     {
         $this->authorizePermission('grade-essays', ['SuperAdmin', 'Guru']);
         $data = $request->validate(['skor' => ['required', 'numeric', 'min:0'], 'komentar' => ['nullable', 'string']]);
+        $answer = DB::table('jawaban_siswas')->find($id);
+        abort_unless($answer, 404);
+        $session = DB::table('sesi_ujians')->where('id', $answer->sesi_ujian_id)->first();
+        abort_unless($session && $session->status === 'selesai', 422, 'Penilaian hanya untuk sesi selesai.');
+        $this->exams->flushAll((int) $answer->sesi_ujian_id);
         $answer = DB::table('jawaban_siswas')->find($id);
         abort_unless($answer, 404);
         $max = DB::table('bank_soals')->where('id', $answer->bank_soal_id)->value('bobot_nilai');

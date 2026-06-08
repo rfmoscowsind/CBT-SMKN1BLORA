@@ -49,6 +49,9 @@ class ExamResultArchiveController extends Controller
             ]);
         abort_unless($class, 404, 'Kelas tidak ditemukan.');
 
+        $yearStart = Carbon::create($data['tahun'], 1, 1, 0, 0, 0, 'Asia/Jakarta')->utc();
+        $yearEnd = Carbon::create($data['tahun'] + 1, 1, 1, 0, 0, 0, 'Asia/Jakarta')->utc();
+
         $scheduleQuery = DB::table('jadwal_ujians as j')
             ->join('jadwal_ujian_kelas as jk', 'jk.jadwal_ujian_id', '=', 'j.id')
             ->join('master_ujians as m', 'm.id', '=', 'j.master_ujian_id')
@@ -58,7 +61,8 @@ class ExamResultArchiveController extends Controller
                 $join->on('h.jadwal_ujian_id', '=', 'j.id')->on('h.kelas_aktif_id', '=', 'jk.kelas_aktif_id');
             })
             ->where('jk.kelas_aktif_id', $class->id)
-            ->whereYear('j.waktu_mulai', $data['tahun'])
+            ->where('j.waktu_mulai', '>=', $yearStart)
+            ->where('j.waktu_mulai', '<', $yearEnd)
             ->whereNotNull('j.diarsipkan_at')
             ->orderByDesc('j.waktu_mulai');
 

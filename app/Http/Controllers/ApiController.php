@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Redis;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 class ApiController extends Controller
@@ -101,6 +102,11 @@ class ApiController extends Controller
         $optionHash = $request->input('opsi_hash');
         $optionId = $optionHash ? $this->ids->decode((string) $optionHash) : null;
         $this->exams->save($session, $questionId, $optionId, $request->input('essay'), $request->input('client_updated_at'));
+        if ($request->has('ragu')) {
+            DB::table('sesi_ujian_soals')
+                ->where(['sesi_ujian_id' => $session->id, 'bank_soal_id' => $questionId])
+                ->update(['ditandai' => $request->boolean('ragu')]);
+        }
 
         return $this->ok(['sisa_detik' => $this->exams->remaining($session)]);
     }
@@ -118,6 +124,11 @@ class ApiController extends Controller
             $optionHash = $answer['opsi_hash'] ?? null;
             $optionId = $optionHash ? $this->ids->decode((string) $optionHash) : null;
             $this->exams->save($session, $questionId, $optionId, $answer['essay'] ?? null, $answer['client_updated_at'] ?? null);
+            if (array_key_exists('ragu', $answer)) {
+                DB::table('sesi_ujian_soals')
+                    ->where(['sesi_ujian_id' => $session->id, 'bank_soal_id' => $questionId])
+                    ->update(['ditandai' => (bool) $answer['ragu']]);
+            }
             $synced++;
         }
 
@@ -127,7 +138,11 @@ class ApiController extends Controller
     public function ping(Request $request, string $sid): JsonResponse
     {
         $session = $this->ownedApiSession($request, $sid);
-        DB::table('sesi_ujians')->where('id', $session->id)->update(['last_seen_at' => now(), 'updated_at' => now()]);
+        Redis::setex("cbt:session:online:{$session->id}", 45, now()->timestamp);
+        if (! Redis::exists("cbt:ping:db:{$session->id}")) {
+            DB::table('sesi_ujians')->where('id', $session->id)->update(['last_seen_at' => now(), 'updated_at' => now()]);
+            Redis::setex("cbt:ping:db:{$session->id}", 60, 1);
+        }
 
         return $this->ok(['sisa_detik' => $this->exams->remaining($session)]);
     }
@@ -172,6 +187,9 @@ class ApiController extends Controller
         $question = DB::table('bank_soals')->where('id', $item->bank_soal_id)->first();
         abort_unless($question, 404);
         $answer = DB::table('jawaban_siswas')->where(['sesi_ujian_id' => $session->id, 'bank_soal_id' => $question->id])->first();
+        $pending = $this->pendingAnswer((int) $session->id, (int) $question->id);
+        $pendingOptionId = $pending['opsi_jawaban_id'] ?? null;
+        $pendingEssay = $pending['jawaban_essay'] ?? null;
 
         return [
             'nomor' => (int) $item->nomor_soal,
@@ -181,9 +199,23 @@ class ApiController extends Controller
             'pertanyaan' => $question->pertanyaan,
             'gambar_url' => $question->gambar_url,
             'opsi' => $this->questionOptions($question, $item),
-            'jawaban_siswa' => $answer?->opsi_jawaban_id ? $this->ids->encode((int) $answer->opsi_jawaban_id) : ($answer?->jawaban_essay),
+            'jawaban_siswa' => $pendingOptionId
+                ? $this->ids->encode((int) $pendingOptionId)
+                : ($pending !== null ? $pendingEssay : ($answer?->opsi_jawaban_id ? $this->ids->encode((int) $answer->opsi_jawaban_id) : ($answer?->jawaban_essay))),
             'ragu' => (bool) $item->ditandai,
         ];
+    }
+
+    private function pendingAnswer(int $sessionId, int $questionId): ?array
+    {
+        $raw = Redis::hget("queue_jawaban:$sessionId", (string) $questionId);
+        if (! $raw) {
+            return null;
+        }
+
+        $payload = json_decode($raw, true);
+
+        return is_array($payload) ? $payload : null;
     }
 
     private function questionOptions(object $question, object $item): array

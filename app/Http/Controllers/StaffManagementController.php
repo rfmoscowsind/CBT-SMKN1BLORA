@@ -130,6 +130,11 @@ class StaffManagementController extends Controller
         $this->ensureStaff($staf);
 
         abort_if($staf->id === Auth::id(), 422, 'Tidak dapat menghapus akun sendiri.');
+        abort_if(
+            DB::table('sesi_ujians')->where('user_id', $staf->id)->exists(),
+            422,
+            'User sudah memiliki riwayat ujian. Nonaktifkan aksesnya, jangan hapus histori.'
+        );
 
         $staf->delete();
 

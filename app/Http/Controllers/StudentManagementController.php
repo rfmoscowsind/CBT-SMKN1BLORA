@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
@@ -152,6 +153,16 @@ class StudentManagementController extends Controller
     {
         $this->authorizeManagement();
         $this->ensureStudent($student);
+
+        if (DB::table('sesi_ujians')->where('user_id', $student->id)->exists()) {
+            $student->update(['status_kehadiran' => 'alpha']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Siswa memiliki riwayat ujian, sehingga dinonaktifkan tanpa menghapus histori.',
+            ]);
+        }
+
         $student->delete();
 
         return response()->json(['success' => true]);

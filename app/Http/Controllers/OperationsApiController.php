@@ -1,12 +1,13 @@
 <?php
 namespace App\Http\Controllers;
+use App\Services\ExamService;
 use App\Services\IdCodec;
 use App\Services\ReportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 class OperationsApiController extends Controller  {
-    public function __construct(private IdCodec $ids,private ReportService $reports) {
+    public function __construct(private IdCodec $ids,private ReportService $reports, private ExamService $exams) {
     }
     private function ok($d=null) {
         return response()->json(['success'=>true,'data'=>$d,'message'=>null,'error'=>null]);
@@ -44,6 +45,11 @@ class OperationsApiController extends Controller  {
     public function grade(Request $r,int $id) {
         $this->permission('grade-essays');
         $d=$r->validate(['skor_manual'=>'required|numeric|min:0','komentar'=>'nullable|string']);
+        $answer=DB::table('jawaban_siswas')->find($id);
+        abort_unless($answer,404);
+        $session=DB::table('sesi_ujians')->where('id',$answer->sesi_ujian_id)->first();
+        abort_unless($session&&$session->status==='selesai',422,'Penilaian hanya untuk sesi selesai.');
+        $this->exams->flushAll((int)$answer->sesi_ujian_id);
         $answer=DB::table('jawaban_siswas')->find($id);
         abort_unless($answer,404);
         $max=DB::table('bank_soals')->where('id',$answer->bank_soal_id)->value('bobot_nilai');

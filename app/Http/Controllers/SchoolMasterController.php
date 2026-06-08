@@ -156,8 +156,9 @@ class SchoolMasterController extends Controller
     {
         $this->authorizeManagement();
         abort_unless(DB::table('kelas_aktifs')->where('id', $id)->exists(), 404);
-        $this->validateJson($request, ['file' => ['required', 'file', 'mimes:xlsx,xls,csv']]);
+        $this->validateJson($request, ['file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:2048']]);
         $rows = IOFactory::load($request->file('file')->getRealPath())->getActiveSheet()->toArray();
+        abort_if(count($rows) > 2001, 422, 'Maksimal 2000 baris per import.');
         $imported = 0;
         $errors = [];
 

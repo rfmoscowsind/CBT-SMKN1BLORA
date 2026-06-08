@@ -13,13 +13,15 @@ class ReportService
 
     public function rowsForClass(int $scheduleId, ?int $classId = null): Collection
     {
-        $answers = DB::table('jawaban_siswas')
+        $answers = DB::table('jawaban_siswas as a')
+            ->join('sesi_ujians as s2', 's2.id', '=', 'a.sesi_ujian_id')
+            ->where('s2.jadwal_ujian_id', $scheduleId)
             ->select(
-                'sesi_ujian_id',
-                DB::raw("coalesce(sum(case when tipe_soal='PG' then skor else 0 end),0) as nilai_pg"),
-                DB::raw("coalesce(sum(case when tipe_soal='ISIAN' then skor else 0 end),0) as nilai_isian")
+                'a.sesi_ujian_id',
+                DB::raw("coalesce(sum(case when a.tipe_soal='PG' then a.skor else 0 end),0) as nilai_pg"),
+                DB::raw("coalesce(sum(case when a.tipe_soal='ISIAN' then a.skor else 0 end),0) as nilai_isian")
             )
-            ->groupBy('sesi_ujian_id');
+            ->groupBy('a.sesi_ujian_id');
         $query = DB::table('jadwal_ujian_kelas as jk')
             ->join('users as u', fn ($join) => $join->on('u.kelas_aktif_id', '=', 'jk.kelas_aktif_id')->where('u.role', '=', 'Siswa'))
             ->leftJoin('sesi_ujians as s', fn ($join) => $join->on('s.user_id', '=', 'u.id')->on('s.jadwal_ujian_id', '=', 'jk.jadwal_ujian_id'))

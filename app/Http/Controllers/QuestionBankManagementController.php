@@ -235,13 +235,18 @@ class QuestionBankManagementController extends Controller
         $soalIds = $questions->pluck('id')->all();
         $options = DB::table('opsi_jawabans')
             ->whereIn('bank_soal_id', $soalIds)
-            ->get(['id', 'bank_soal_id', 'is_benar'])
+            ->get(['id', 'bank_soal_id', 'teks_opsi', 'is_benar'])
             ->groupBy('bank_soal_id');
 
         foreach ($questions as $question) {
+            abort_if(trim((string) $question->pertanyaan) === '', 422, 'Pertanyaan tidak boleh kosong.');
+            abort_if(str_starts_with((string) $question->pertanyaan, 'Pertanyaan soal nomor'), 422, 'Masih ada soal placeholder.');
+            abort_if((float) $question->bobot_nilai <= 0, 422, 'Bobot soal harus lebih dari 0.');
+
             if ($question->tipe_soal === 'PG') {
                 $opts = $options->get($question->id, collect());
                 abort_if($opts->count() < 2, 422, 'Soal PG minimal memiliki dua opsi.');
+                abort_if($opts->contains(fn ($opt) => trim((string) $opt->teks_opsi) === ''), 422, 'Teks opsi tidak boleh kosong.');
                 abort_unless($opts->where('is_benar', true)->count() === 1, 422, 'Soal PG harus memiliki tepat satu kunci.');
             }
         }
@@ -255,8 +260,9 @@ class QuestionBankManagementController extends Controller
     {
         $this->ownedPackage($id);
         $this->ensureEditable($id);
-        $this->validateJson($request, ['file' => ['required', 'file', 'mimes:xlsx,xls,csv']]);
+        $this->validateJson($request, ['file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:2048']]);
         $rows = IOFactory::load($request->file('file')->getRealPath())->getActiveSheet()->toArray();
+        abort_if(count($rows) > 2001, 422, 'Maksimal 2000 baris per import.');
         $imported = 0;
         $errors = [];
         foreach (array_slice($rows, 1) as $index => $row) {

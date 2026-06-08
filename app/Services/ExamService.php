@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Jobs\PersistAnswerSnapshot;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
@@ -74,7 +75,8 @@ class ExamService
         );
 
         // FIX #1: Wrap dalam transaction + lockForUpdate untuk mencegah race condition.
-        return DB::transaction(function () use ($user, $j, $ip, $ua) {
+        try {
+            return DB::transaction(function () use ($user, $j, $ip, $ua) {
             // Cek ulang di dalam transaksi dengan row-level lock
             $existing = DB::table('sesi_ujians')
                 ->where('user_id', $user->id)
@@ -83,22 +85,39 @@ class ExamService
                 ->first();
 
             if ($existing) {
-                $this->event($existing->id, 'login_return', ['ip' => $ip, 'user_agent' => $ua]);
-                return $existing;
-            }
+                if (! in_array($existing->status, ['reset', 'invalidated'], true)) {
+                    $this->event($existing->id, 'login_return', ['ip' => $ip, 'user_agent' => $ua]);
+                    return $existing;
+                }
 
-            // Buat sesi baru (aman dari duplikat karena sudah di dalam lock)
-            $sessionId = DB::table('sesi_ujians')->insertGetId([
-                'user_id'         => $user->id,
-                'jadwal_ujian_id' => $j->id,
-                'waktu_login'     => now(),
-                'status'          => 'aktif',
-                'ip_address'      => $ip,
-                'device_info'     => json_encode(['user_agent' => $ua]),
-                'last_seen_at'    => now(),
-                'created_at'      => now(),
-                'updated_at'      => now(),
-            ]);
+                $sessionId = (int) $existing->id;
+                Redis::del("queue_jawaban:$sessionId");
+                DB::table('jawaban_siswas')->where('sesi_ujian_id', $sessionId)->delete();
+                DB::table('sesi_ujian_soals')->where('sesi_ujian_id', $sessionId)->delete();
+                DB::table('sesi_ujians')->where('id', $sessionId)->update([
+                    'waktu_login'  => now(),
+                    'waktu_submit' => null,
+                    'status'       => 'aktif',
+                    'ip_address'   => $ip,
+                    'device_info'  => json_encode(['user_agent' => $ua]),
+                    'nilai_akhir'  => null,
+                    'last_seen_at' => now(),
+                    'updated_at'   => now(),
+                ]);
+            } else {
+                // Buat sesi baru (aman dari duplikat karena sudah di dalam lock)
+                $sessionId = DB::table('sesi_ujians')->insertGetId([
+                    'user_id'         => $user->id,
+                    'jadwal_ujian_id' => $j->id,
+                    'waktu_login'     => now(),
+                    'status'          => 'aktif',
+                    'ip_address'      => $ip,
+                    'device_info'     => json_encode(['user_agent' => $ua]),
+                    'last_seen_at'    => now(),
+                    'created_at'      => now(),
+                    'updated_at'      => now(),
+                ]);
+            }
 
             // Ambil ID soal dari paket
             $soalIds = DB::table('jadwal_ujians as j')
@@ -143,10 +162,24 @@ class ExamService
                 DB::table('sesi_ujian_soals')->insert($rows);
             }
 
-            $this->event($sessionId, 'login', ['ip' => $ip, 'user_agent' => $ua]);
+            $this->event($sessionId, $existing ? 'login_after_reset' : 'login', ['ip' => $ip, 'user_agent' => $ua]);
 
             return DB::table('sesi_ujians')->find($sessionId);
-        });
+            });
+        } catch (QueryException $exception) {
+            if ($exception->getCode() !== '23505') {
+                throw $exception;
+            }
+
+            $existing = DB::table('sesi_ujians')
+                ->where(['user_id' => $user->id, 'jadwal_ujian_id' => $j->id])
+                ->first();
+            abort_unless($existing, 409, 'Sesi ujian sedang dibuat. Coba ulangi.');
+
+            $this->event($existing->id, 'login_return_after_duplicate', ['ip' => $ip, 'user_agent' => $ua]);
+
+            return $existing;
+        }
     }
 
     /**
@@ -266,6 +299,11 @@ class ExamService
 
     public function flushOne(int $sessionId, int $soalId): void
     {
+        if (! $this->isFlushableSession($sessionId)) {
+            Redis::del("queue_jawaban:$sessionId");
+            return;
+        }
+
         $raw = Redis::hget("queue_jawaban:$sessionId", (string) $soalId);
         if (!$raw) {
             return;
@@ -274,17 +312,6 @@ class ExamService
         $a = json_decode($raw, true);
         $q = DB::table('bank_soals')->find($soalId);
         if (!$q) {
-            $this->forgetIfCurrent("queue_jawaban:$sessionId", (string) $soalId, $raw);
-            return;
-        }
-
-        $current = DB::table('jawaban_siswas')
-            ->where(['sesi_ujian_id' => $sessionId, 'bank_soal_id' => $soalId])
-            ->first();
-        if (
-            $current && $current->server_updated_at
-            && now()->parse($current->server_updated_at)->gt(now()->parse($a['server_updated_at']))
-        ) {
             $this->forgetIfCurrent("queue_jawaban:$sessionId", (string) $soalId, $raw);
             return;
         }
@@ -299,40 +326,20 @@ class ExamService
             $status = 'auto_scored';
         }
 
-        DB::table('jawaban_siswas')->updateOrInsert(
-            ['sesi_ujian_id' => $sessionId, 'bank_soal_id' => $soalId],
-            [
-                'opsi_jawaban_id'   => $a['opsi_jawaban_id'],
-                'jawaban_essay'     => $a['jawaban_essay'],
-                'tipe_soal'         => $q->tipe_soal,
-                'skor'              => $score,
-                'scoring_status'    => $status,
-                'client_updated_at' => $a['client_updated_at'],
-                'server_updated_at' => $a['server_updated_at'],
-                'created_at'        => now(),
-                'updated_at'        => now(),
-            ]
-        );
-
-        DB::table('audit_logs')->insert([
-            'sesi_ujian_id' => $sessionId,
-            'user_id'       => $a['user_id'],
-            'action'        => 'answer_saved',
-            'bank_soal_id'  => $soalId,
-            'payload'       => json_encode([
-                'opsi_id'           => $a['opsi_jawaban_id'],
-                'client_updated_at' => $a['client_updated_at'],
-                'server_updated_at' => $a['server_updated_at'],
-            ]),
-            'created_at'    => now(),
-            'updated_at'    => now(),
-        ]);
+        if ($this->persistAnswerIfNewer($sessionId, $soalId, $a, $q, $score, $status)) {
+            $this->auditAnswerSaved($sessionId, $soalId, $a);
+        }
 
         $this->forgetIfCurrent("queue_jawaban:$sessionId", (string) $soalId, $raw);
     }
 
     public function flushAll(int $sessionId): void
     {
+        if (! $this->isFlushableSession($sessionId)) {
+            Redis::del("queue_jawaban:$sessionId");
+            return;
+        }
+
         $queue = Redis::hgetall("queue_jawaban:$sessionId");
         if (empty($queue)) {
             return;
@@ -343,13 +350,6 @@ class ExamService
         // Fetch all bank_soals for these IDs (1 query)
         $questions = DB::table('bank_soals')->whereIn('id', $soalIds)->get()->keyBy('id');
 
-        // Fetch existing jawaban_siswas for these IDs (1 query)
-        $existing = DB::table('jawaban_siswas')
-            ->where('sesi_ujian_id', $sessionId)
-            ->whereIn('bank_soal_id', $soalIds)
-            ->get()
-            ->keyBy('bank_soal_id');
-
         // Fetch all correct options for PG questions (1 query)
         $correctOptions = DB::table('opsi_jawabans')
             ->whereIn('bank_soal_id', $soalIds)
@@ -357,8 +357,7 @@ class ExamService
             ->pluck('id', 'bank_soal_id')
             ->all();
 
-        $rowsToUpsert = [];
-        $auditLogs = [];
+        $rowsToPersist = [];
         $forgetFields = [];
 
         foreach ($queue as $soalIdStr => $raw) {
@@ -367,15 +366,6 @@ class ExamService
             $q = $questions->get($soalId);
 
             if (!$q) {
-                $forgetFields[$soalIdStr] = $raw;
-                continue;
-            }
-
-            $current = $existing->get($soalId);
-            if (
-                $current && $current->server_updated_at
-                && now()->parse($current->server_updated_at)->gt(now()->parse($a['server_updated_at']))
-            ) {
                 $forgetFields[$soalIdStr] = $raw;
                 continue;
             }
@@ -389,54 +379,121 @@ class ExamService
                 $status = 'auto_scored';
             }
 
-            $rowsToUpsert[] = [
-                'sesi_ujian_id'     => $sessionId,
-                'bank_soal_id'      => $soalId,
-                'opsi_jawaban_id'   => $a['opsi_jawaban_id'],
-                'jawaban_essay'     => $a['jawaban_essay'],
-                'tipe_soal'         => $q->tipe_soal,
-                'skor'              => $score,
-                'scoring_status'    => $status,
-                'client_updated_at' => $a['client_updated_at'],
-                'server_updated_at' => $a['server_updated_at'],
-                'created_at'        => now(),
-                'updated_at'        => now(),
-            ];
-
-            $auditLogs[] = [
-                'sesi_ujian_id' => $sessionId,
-                'user_id'       => $a['user_id'],
-                'action'        => 'answer_saved',
-                'bank_soal_id'  => $soalId,
-                'payload'       => json_encode([
-                    'opsi_id'           => $a['opsi_jawaban_id'],
-                    'client_updated_at' => $a['client_updated_at'],
-                    'server_updated_at' => $a['server_updated_at'],
-                ]),
-                'created_at'    => now(),
-                'updated_at'    => now(),
-            ];
+            $rowsToPersist[] = [$soalId, $a, $q, $score, $status];
 
             $forgetFields[$soalIdStr] = $raw;
         }
 
-        DB::transaction(function () use ($rowsToUpsert, $auditLogs) {
-            if (!empty($rowsToUpsert)) {
-                DB::table('jawaban_siswas')->upsert(
-                    $rowsToUpsert,
-                    ['sesi_ujian_id', 'bank_soal_id'],
-                    ['opsi_jawaban_id', 'jawaban_essay', 'tipe_soal', 'skor', 'scoring_status', 'client_updated_at', 'server_updated_at', 'updated_at']
-                );
-            }
-
-            if (!empty($auditLogs)) {
-                DB::table('audit_logs')->insert($auditLogs);
+        DB::transaction(function () use ($rowsToPersist, $sessionId) {
+            foreach ($rowsToPersist as [$soalId, $a, $q, $score, $status]) {
+                if ($this->persistAnswerIfNewer($sessionId, $soalId, $a, $q, $score, $status)) {
+                    $this->auditAnswerSaved($sessionId, $soalId, $a);
+                }
             }
         });
 
         foreach ($forgetFields as $field => $raw) {
             $this->forgetIfCurrent("queue_jawaban:$sessionId", $field, $raw);
         }
+    }
+
+    private function isFlushableSession(int $sessionId): bool
+    {
+        $status = DB::table('sesi_ujians')->where('id', $sessionId)->value('status');
+
+        return in_array($status, ['aktif', 'selesai'], true);
+    }
+
+    private function persistAnswerIfNewer(int $sessionId, int $soalId, array $answer, object $question, float|int $score, string $status): bool
+    {
+        $now = now();
+
+        if (DB::getDriverName() === 'pgsql') {
+            $rows = DB::select(
+                "
+                INSERT INTO jawaban_siswas (
+                    sesi_ujian_id, bank_soal_id, opsi_jawaban_id, jawaban_essay,
+                    tipe_soal, skor, scoring_status, client_updated_at,
+                    server_updated_at, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (sesi_ujian_id, bank_soal_id)
+                DO UPDATE SET
+                    opsi_jawaban_id = EXCLUDED.opsi_jawaban_id,
+                    jawaban_essay = EXCLUDED.jawaban_essay,
+                    tipe_soal = EXCLUDED.tipe_soal,
+                    skor = EXCLUDED.skor,
+                    scoring_status = EXCLUDED.scoring_status,
+                    client_updated_at = EXCLUDED.client_updated_at,
+                    server_updated_at = EXCLUDED.server_updated_at,
+                    updated_at = EXCLUDED.updated_at
+                WHERE jawaban_siswas.server_updated_at IS NULL
+                   OR EXCLUDED.server_updated_at >= jawaban_siswas.server_updated_at
+                RETURNING id
+                ",
+                [
+                    $sessionId,
+                    $soalId,
+                    $answer['opsi_jawaban_id'] ?? null,
+                    $answer['jawaban_essay'] ?? null,
+                    $question->tipe_soal,
+                    $score,
+                    $status,
+                    $answer['client_updated_at'] ?? null,
+                    $answer['server_updated_at'] ?? null,
+                    $now,
+                    $now,
+                ]
+            );
+
+            return ! empty($rows);
+        }
+
+        $current = DB::table('jawaban_siswas')
+            ->where(['sesi_ujian_id' => $sessionId, 'bank_soal_id' => $soalId])
+            ->first();
+
+        if (
+            $current && $current->server_updated_at
+            && ($answer['server_updated_at'] ?? null)
+            && now()->parse($current->server_updated_at)->gt(now()->parse($answer['server_updated_at']))
+        ) {
+            return false;
+        }
+
+        DB::table('jawaban_siswas')->updateOrInsert(
+            ['sesi_ujian_id' => $sessionId, 'bank_soal_id' => $soalId],
+            [
+                'opsi_jawaban_id'   => $answer['opsi_jawaban_id'] ?? null,
+                'jawaban_essay'     => $answer['jawaban_essay'] ?? null,
+                'tipe_soal'         => $question->tipe_soal,
+                'skor'              => $score,
+                'scoring_status'    => $status,
+                'client_updated_at' => $answer['client_updated_at'] ?? null,
+                'server_updated_at' => $answer['server_updated_at'] ?? null,
+                'created_at'        => $now,
+                'updated_at'        => $now,
+            ]
+        );
+
+        return true;
+    }
+
+    private function auditAnswerSaved(int $sessionId, int $soalId, array $answer): void
+    {
+        DB::table('audit_logs')->insert([
+            'sesi_ujian_id' => $sessionId,
+            'user_id'       => $answer['user_id'] ?? null,
+            'action'        => 'answer_saved',
+            'bank_soal_id'  => $soalId,
+            'payload'       => json_encode([
+                'opsi_id'           => $answer['opsi_jawaban_id'] ?? null,
+                'client_updated_at' => $answer['client_updated_at'] ?? null,
+                'server_updated_at' => $answer['server_updated_at'] ?? null,
+            ]),
+            'created_at'    => now(),
+            'updated_at'    => now(),
+        ]);
     }
 
     /**

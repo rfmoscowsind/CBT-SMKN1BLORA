@@ -37,6 +37,8 @@ class ExamResultDownloadController extends Controller
     public function download(Request $request): Response
     {
         [$schedule, $class] = $this->target($request);
+        $pdf = $this->pdf($schedule, $class);
+
         DB::table('hasil_ujian_unduhans')->updateOrInsert([
             'jadwal_ujian_id' => $schedule->id,
             'kelas_aktif_id' => $class->id,
@@ -47,7 +49,7 @@ class ExamResultDownloadController extends Controller
             'updated_at' => now(),
         ]);
 
-        return $this->pdf($schedule, $class)->download($this->filename($schedule, $class));
+        return $pdf->download($this->filename($schedule, $class));
     }
 
     private function target(Request $request): array

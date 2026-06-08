@@ -20,6 +20,27 @@ Lingkup: audit kode statis, route, konfigurasi, dependency audit, dan cek runtim
 
 ## Temuan Kritis dan Tinggi
 
+### GPT0806 - [SELESAI BERTAHAP 2026-06-08] Rekomendasi data safety dan performa ujian massal
+
+Status: sebagian besar rekomendasi P0 dan beberapa P1 dari `gpt0806.md` sudah diimplementasikan. Detail lengkap ada di `IMPLEMENTASI_GPT0806.md`.
+
+Perbaikan utama:
+- Tambah migration safety index untuk unique sesi, unique jawaban, unique soal sesi, unique urutan soal, dan index report/monitoring.
+- Persist jawaban dari Redis ke DB dibuat timestamp-safe dengan PostgreSQL `ON CONFLICT ... WHERE server_updated_at`.
+- Job persist jawaban dibuat unique per `(sessionId, questionId)`.
+- Reset sesi tidak hard delete row sesi dan membersihkan pending Redis.
+- API ujian membaca pending answer Redis seperti Web.
+- Ping API memakai Redis-first dan update DB dibatasi.
+- Report aggregate difilter per jadwal.
+- Arsip tahun memakai range WIB ke UTC.
+- Manual grading wajib sesi selesai dan flush pending answer.
+- Hard delete user dengan histori ujian dicegah.
+- Validasi paket ready, import, image upload, dan IdCodec salt diperketat.
+
+Catatan:
+- Migration baru harus dijalankan di server produksi.
+- Jika unique index gagal karena data duplikat lama, bersihkan data duplikat dulu.
+
 ### K1 - [SELESAI 2026-06-03] Device lock mematikan sesi Redis yang tercatat
 
 Status: selesai untuk jalur web session. Produksi memakai `SESSION_DRIVER=redis`, jadi fix menambahkan registry session-id per user dan invalidasi lewat session handler Laravel, bukan hanya hapus tabel `sessions`.
