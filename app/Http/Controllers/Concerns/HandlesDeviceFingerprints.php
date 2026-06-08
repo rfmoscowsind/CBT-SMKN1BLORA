@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 trait HandlesDeviceFingerprints
 {
@@ -83,6 +84,91 @@ trait HandlesDeviceFingerprints
             'device_fingerprint_raw' => json_encode($this->deviceRaw($request)),
             'is_device_locked'       => false,
             'updated_at'             => now(),
+        ]);
+    }
+
+    protected function deviceLockEnabled(): bool
+    {
+        return Cache::remember('setting:device_lock_enabled', 30, function () {
+            if (! Schema::hasTable('app_settings')) {
+                return filter_var(env('DEVICE_LOCK_ENABLED', true), FILTER_VALIDATE_BOOLEAN);
+            }
+
+            $value = DB::table('app_settings')
+                ->where('key', 'device_lock_enabled')
+                ->value('value');
+
+            if ($value === null) {
+                return filter_var(env('DEVICE_LOCK_ENABLED', true), FILTER_VALIDATE_BOOLEAN);
+            }
+
+            return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+        });
+    }
+
+    protected function setDeviceLockEnabled(bool $enabled, ?int $actorId = null): bool
+    {
+        abort_unless(Schema::hasTable('app_settings'), 503, 'Tabel pengaturan belum tersedia. Jalankan migration terlebih dahulu.');
+
+        $old = $this->deviceLockEnabled();
+
+        DB::table('app_settings')->updateOrInsert(
+            ['key' => 'device_lock_enabled'],
+            [
+                'value' => $enabled ? 'true' : 'false',
+                'updated_by' => $actorId,
+                'updated_at' => now(),
+            ]
+        );
+
+        Cache::forget('setting:device_lock_enabled');
+
+        DB::table('audit_logs')->insert([
+            'user_id' => $actorId,
+            'action' => 'device_lock_setting_changed',
+            'payload' => json_encode(['old' => $old, 'new' => $enabled]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $enabled;
+    }
+
+    protected function recordDeviceFingerprintHistory(User $user, Request $request, string $fingerprint, ?object $session = null, string $action = 'checked'): void
+    {
+        if (! Schema::hasTable('device_fingerprint_histories')) {
+            return;
+        }
+
+        $lockEnabled = $this->deviceLockEnabled();
+        $dedup = sha1(implode('|', [
+            $user->id,
+            $fingerprint,
+            $session->id ?? '',
+            $request->ip(),
+            $request->userAgent(),
+            $action,
+            $lockEnabled ? '1' : '0',
+        ]));
+
+        if (! Cache::add("device-history:$dedup", 1, now()->addSeconds(60))) {
+            return;
+        }
+
+        DB::table('device_fingerprint_histories')->insert([
+            'user_id' => $user->id,
+            'nis' => $user->nis ?? null,
+            'nisn' => $user->nisn ?? null,
+            'username' => $user->username,
+            'sesi_ujian_id' => $session->id ?? null,
+            'jadwal_ujian_id' => $session->jadwal_ujian_id ?? null,
+            'fingerprint' => $fingerprint,
+            'fingerprint_raw' => json_encode($this->deviceRaw($request)),
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'lock_enabled' => $lockEnabled,
+            'action' => $action,
+            'created_at' => now(),
         ]);
     }
 
@@ -266,12 +352,13 @@ trait HandlesDeviceFingerprints
             abort(401);
         }
 
+        $lockEnabled = $this->deviceLockEnabled();
         $sessionLocked = $session && (
             (bool) ($session->is_device_locked ?? false)
             || ($session->status ?? null) === 'terkunci'
         );
 
-        if ((bool) $freshUser->is_device_locked || $sessionLocked) {
+        if ($lockEnabled && ((bool) $freshUser->is_device_locked || $sessionLocked)) {
             abort(423, 'Akun terkunci karena terdeteksi perangkat berbeda. Silakan hubungi admin.');
         }
 
@@ -281,6 +368,25 @@ trait HandlesDeviceFingerprints
         }
 
         $raw   = $this->deviceRaw($request);
+        $this->recordDeviceFingerprintHistory(
+            $freshUser,
+            $request,
+            $fingerprint,
+            $session,
+            $lockEnabled ? 'checked' : 'audit_only'
+        );
+
+        if (! $lockEnabled) {
+            if (! $freshUser->device_fingerprint) {
+                $this->rememberUserDevice($freshUser, $request);
+            }
+            if ($session && isset($session->id) && ! ($session->device_fingerprint ?? null)) {
+                $this->rememberSessionDevice((int) $session->id, $request);
+            }
+
+            return;
+        }
+
         $known = $freshUser->device_fingerprint ?: ($session->device_fingerprint ?? null);
         $known = $this->isUsableFingerprint($known) ? $known : null;
 

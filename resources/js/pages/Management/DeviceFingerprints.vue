@@ -30,6 +30,42 @@
                 </button>
             </div>
 
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-body p-3">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                        <div>
+                            <h6 class="fw-bold mb-1">
+                                <i class="fa-solid fa-shield-halved me-2" :class="deviceLockEnabled ? 'text-success' : 'text-warning'"></i>
+                                Device Lock {{ deviceLockEnabled ? 'ON' : 'OFF' }}
+                            </h6>
+                            <div class="small text-muted">
+                                {{ deviceLockEnabled
+                                    ? 'Perubahan perangkat siswa akan diblokir dan dicatat.'
+                                    : 'Siswa dapat pindah perangkat tanpa diblokir. Histori fingerprint tetap dicatat untuk audit.' }}
+                            </div>
+                        </div>
+                        <div class="form-check form-switch fs-5 mb-0">
+                            <input
+                                class="form-check-input"
+                                type="checkbox"
+                                role="switch"
+                                id="deviceLockToggle"
+                                v-model="deviceLockEnabled"
+                                :disabled="deviceLockSaving"
+                                @change="toggleDeviceLock"
+                            >
+                            <label class="form-check-label fw-semibold" for="deviceLockToggle">
+                                {{ deviceLockSaving ? 'Menyimpan...' : (deviceLockEnabled ? 'Aktif' : 'Audit Only') }}
+                            </label>
+                        </div>
+                    </div>
+                    <div v-if="!deviceLockEnabled" class="alert alert-warning py-2 px-3 mt-3 mb-0 small">
+                        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                        Device Lock sedang OFF. Siswa tidak akan terkunci saat pindah perangkat, tetapi histori perangkat tetap tersimpan.
+                    </div>
+                </div>
+            </div>
+
             <!-- Stats Bar -->
             <div class="row mb-4">
                 <div class="col-md-3 mb-3 mb-md-0">
@@ -216,11 +252,19 @@
                                             <!-- Lock/Unlock Action -->
                                             <button 
                                                 v-if="isLocked(s)"
-                                                @click="confirmUnlock(s)" 
+                                                @click="s.sesi_id ? confirmResumeSession(s) : confirmUnlock(s)" 
                                                 class="btn btn-outline-success btn-sm px-3"
-                                                title="Buka kunci akses siswa"
+                                                title="Buka sesi agar siswa bisa melanjutkan tanpa kehilangan jawaban"
                                             >
-                                                <i class="fa-solid fa-lock-open me-1"></i> Buka Kunci
+                                                <i class="fa-solid fa-play me-1"></i> Lanjutkan
+                                            </button>
+                                            <button
+                                                v-else-if="s.sesi_id && s.status !== 'selesai' && s.status !== 'reset'"
+                                                @click="confirmResumeSession(s)"
+                                                class="btn btn-outline-primary btn-sm px-3"
+                                                title="Buka sesi tanpa menghapus jawaban"
+                                            >
+                                                <i class="fa-solid fa-play me-1"></i> Buka Sesi
                                             </button>
                                             <button 
                                                 v-else-if="s.device_fingerprint"
@@ -237,6 +281,14 @@
                                                 title="Kunci gawai/akses siswa"
                                             >
                                                 <i class="fa-solid fa-lock me-1"></i> Kunci
+                                            </button>
+                                            <button
+                                                v-if="s.sesi_id && s.status !== 'selesai'"
+                                                @click="confirmResetExamSession(s)"
+                                                class="btn btn-outline-danger btn-sm px-3"
+                                                title="Reset ujian dari nol dan hapus jawaban"
+                                            >
+                                                <i class="fa-solid fa-trash-arrow-up me-1"></i> Reset Nol
                                             </button>
                                             
                                             <!-- View Details Modal Trigger -->
@@ -342,14 +394,17 @@
                         </div>
                         <div class="modal-footer bg-light border-top">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
-                            <button v-if="isLocked(selectedSession)" @click="unlockDirect(selectedSession.id)" class="btn btn-success">
-                                <i class="fa-solid fa-lock-open me-1"></i> Buka Kunci Akses
+                            <button v-if="selectedSession.sesi_id && selectedSession.status !== 'selesai' && selectedSession.status !== 'reset'" @click="resumeDirect(selectedSession)" class="btn btn-primary">
+                                <i class="fa-solid fa-play me-1"></i> Buka Sesi / Lanjutkan
                             </button>
-                            <button v-else-if="selectedSession.device_fingerprint" @click="resetDeviceDirect(selectedSession.id)" class="btn btn-success">
+                            <button v-if="selectedSession.device_fingerprint" @click="resetDeviceDirect(selectedSession.id)" class="btn btn-success">
                                 <i class="fa-solid fa-rotate-left me-1"></i> Reset Gawai
                             </button>
                             <button v-if="!isLocked(selectedSession) && selectedSession.device_fingerprint" @click="lockDirect(selectedSession.id)" class="btn btn-danger">
                                 <i class="fa-solid fa-lock me-1"></i> Kunci Akses Siswa
+                            </button>
+                            <button v-if="selectedSession.sesi_id && selectedSession.status !== 'selesai'" @click="confirmResetExamSession(selectedSession)" class="btn btn-outline-danger">
+                                <i class="fa-solid fa-trash-arrow-up me-1"></i> Reset Ulang dari Nol
                             </button>
                         </div>
                     </div>
@@ -375,6 +430,8 @@ const filterStatus = ref('all');
 const filterKelas = ref('all');
 const selectedSession = ref(null);
 const modalDetails = ref(null);
+const deviceLockEnabled = ref(true);
+const deviceLockSaving = ref(false);
 let modalInstance = null;
 
 const fetchSessions = async () => {
@@ -383,6 +440,7 @@ const fetchSessions = async () => {
         const response = await axios.get('/kelola/data/device-fingerprints', { headers: { 'Accept': 'application/json' } });
         if (response.data?.success) {
             sessions.value = response.data.data || [];
+            deviceLockEnabled.value = Boolean(response.data.settings?.device_lock_enabled ?? true);
         } else {
             throw new Error('Endpoint tidak mengembalikan JSON fingerprint.');
         }
@@ -394,6 +452,22 @@ const fetchSessions = async () => {
     }
 };
 
+const toggleDeviceLock = async () => {
+    const target = Boolean(deviceLockEnabled.value);
+    deviceLockSaving.value = true;
+    try {
+        const response = await axios.post('/kelola/data/device-lock/toggle', { enabled: target }, { headers: { 'Accept': 'application/json' } });
+        deviceLockEnabled.value = Boolean(response.data.device_lock_enabled);
+        Swal.fire('Berhasil', response.data.message, 'success');
+    } catch (e) {
+        console.error(e);
+        deviceLockEnabled.value = !target;
+        Swal.fire('Gagal', 'Gagal mengubah status Device Lock.', 'error');
+    } finally {
+        deviceLockSaving.value = false;
+    }
+};
+
 const isLocked = (session) => {
     if (!session) return false;
     return Boolean(session.is_device_locked)
@@ -401,7 +475,7 @@ const isLocked = (session) => {
         || session.status === 'terkunci';
 };
 
-const activeCount = computed(() => sessions.value.filter(s => s.sesi_id || s.status === 'aktif').length);
+const activeCount = computed(() => sessions.value.filter(s => ['aktif', 'terkunci'].includes(s.status)).length);
 
 const lockedCount = computed(() => sessions.value.filter(s => isLocked(s)).length);
 
@@ -637,6 +711,74 @@ const confirmResetDevice = (session) => {
             unlockSession(session.id);
         }
     });
+};
+
+const confirmResumeSession = (session) => {
+    Swal.fire({
+        title: 'Buka Sesi / Lanjutkan?',
+        text: `Membuka sesi ${session.name} tanpa menghapus jawaban. Waktu ujian tetap dihitung dari waktu mulai awal.`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#2563eb',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Ya, Lanjutkan',
+        cancelButtonText: 'Batal'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            resumeSession(session);
+        }
+    });
+};
+
+const resumeSession = async (session) => {
+    if (!session?.sesi_id) return;
+    try {
+        const response = await axios.post(`/kelola/sesi/${session.sesi_id}/unlock-resume`, {}, { headers: { 'Accept': 'application/json' } });
+        if (response.data.success) {
+            Swal.fire('Berhasil', response.data.message, 'success');
+            fetchSessions();
+            if (modalInstance) modalInstance.hide();
+        }
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Gagal', e.response?.data?.message || 'Gagal membuka sesi siswa.', 'error');
+    }
+};
+
+const resumeDirect = (session) => {
+    resumeSession(session);
+};
+
+const confirmResetExamSession = (session) => {
+    Swal.fire({
+        title: 'Reset Ulang dari Nol?',
+        text: `PERINGATAN: Jawaban ${session.name} akan dihapus dan siswa mengulang dari awal.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc2626',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Ya, Reset dari Nol',
+        cancelButtonText: 'Batal'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            resetExamSession(session);
+        }
+    });
+};
+
+const resetExamSession = async (session) => {
+    if (!session?.sesi_id) return;
+    try {
+        const response = await axios.post(`/kelola/sesi/${session.sesi_id}/reset`, {}, { headers: { 'Accept': 'application/json' } });
+        if (response.data.success) {
+            Swal.fire('Berhasil', response.data.message, 'success');
+            fetchSessions();
+            if (modalInstance) modalInstance.hide();
+        }
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Gagal', e.response?.data?.message || 'Gagal reset ulang sesi.', 'error');
+    }
 };
 
 const unlockSession = async (id) => {

@@ -431,6 +431,53 @@ class AdminApiController extends Controller
         return $this->ok(['message' => 'Sesi berhasil direset dan antrean jawaban Redis dibersihkan.']);
     }
 
+    public function unlockSessionForResume(int $id): JsonResponse
+    {
+        $this->permission('monitor-exams', ['SuperAdmin', 'Admin', 'Pengawas']);
+
+        DB::transaction(function () use ($id) {
+            $session = DB::table('sesi_ujians')->where('id', $id)->lockForUpdate()->first();
+            abort_unless($session, 404);
+            abort_if($session->status === 'selesai', 422, 'Sesi sudah selesai. Tidak perlu dibuka.');
+            abort_if($session->status === 'reset', 422, 'Sesi sudah direset dari nol. Siswa harus mulai ulang.');
+
+            DB::table('users')->where('id', $session->user_id)->update([
+                'device_fingerprint' => null,
+                'device_fingerprint_raw' => null,
+                'is_device_locked' => false,
+                'updated_at' => now(),
+            ]);
+
+            DB::table('sesi_ujians')->where('id', $id)->update([
+                'status' => 'aktif',
+                'waktu_submit' => null,
+                'device_fingerprint' => null,
+                'device_fingerprint_raw' => null,
+                'is_device_locked' => false,
+                'last_seen_at' => null,
+                'updated_at' => now(),
+            ]);
+
+            DB::table('session_events')->insert([
+                'sesi_ujian_id' => $id,
+                'event_type' => 'api_session_resume_unlock',
+                'event_data' => json_encode([
+                    'actor_id' => Auth::guard('api')->id(),
+                    'non_destructive' => true,
+                    'preserved_answers' => true,
+                    'preserved_started_at' => $session->waktu_login,
+                ]),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            Redis::del("cbt:session:online:$id");
+            Redis::del("cbt:ping:db:$id");
+        });
+
+        return $this->ok(['message' => 'Sesi berhasil dibuka. Jawaban tetap aman dan siswa bisa melanjutkan ujian.']);
+    }
+
     public function report(int $jadwal, string $format = 'json')
     {
         $this->permission('view-reports', ['SuperAdmin', 'Admin', 'Guru']);

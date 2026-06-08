@@ -2,6 +2,27 @@
 
 ---
 
+## 2026-06-08 - GPT08061 Resume Session dan Device Lock Toggle
+
+| File | Perubahan | Kategori |
+|------|-----------|----------|
+| `ExamService.php` | Pending answer Redis tetap flushable saat sesi `terkunci` | Fix data safety |
+| `HandlesDeviceFingerprints.php` | Tambah setting global Device Lock, audit-only mode, dan histori fingerprint | Security / audit |
+| `ManageController.php` | Tambah endpoint `POST /kelola/sesi/{id}/unlock-resume` dan `POST /kelola/data/device-lock/toggle` | Fitur |
+| `AdminApiController.php` | Tambah endpoint API pengawas `POST /api/v1/pengawas/sesi/{id}/unlock-resume` | Fitur |
+| `DeviceFingerprints.vue` | Tambah switch Device Lock ON/OFF, tombol `Buka Sesi / Lanjutkan`, dan tombol destruktif `Reset Ulang dari Nol` | UI |
+| `2026_06_08_110000_add_device_lock_settings_and_history.php` | Tambah tabel `app_settings` dan `device_fingerprint_histories` | Database |
+| `IMPLEMENTASI_GPT08061.md` | Dokumentasi teknis implementasi resume session dan toggle Device Lock | Dokumentasi |
+| `gpt08061.md` / `known.md` | Tandai rekomendasi yang sudah selesai dan catatan sisa refactor | Dokumentasi |
+
+Catatan operasional:
+
+- Gunakan `Buka Sesi / Lanjutkan` untuk siswa yang terkunci/perlu lanjut tanpa kehilangan jawaban.
+- Gunakan `Reset Ulang dari Nol` hanya jika jawaban siswa memang boleh dihapus.
+- Jika Device Lock OFF, pindah perangkat tidak diblokir tetapi fingerprint tetap dicatat untuk audit.
+
+---
+
 ## 🔄 Ringkasan Semua Perubahan
 
 | # | File | Perubahan | Kategori |
@@ -202,4 +223,4 @@ if (!Redis::exists("cbt:ping:db:{$session->id}")) {
 
 **Dampak performa:** Dari ~150 DB write/detik → ~2-3 DB write/detik saat 1500 siswa aktif.
 
----
+---

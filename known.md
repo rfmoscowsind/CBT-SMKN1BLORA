@@ -272,7 +272,7 @@ Rekomendasi:
 - Buat SOP admin: reset device hanya setelah verifikasi siswa/ruang.
 - Tampilkan alasan lock yang jelas di panel.
 
-### D5 - Unlock tidak membersihkan session `terkunci`
+### D5 - [SELESAI 2026-06-08] Unlock tidak membersihkan session `terkunci`
 
 `lockStudentDevice()` mengubah semua sesi aktif user menjadi `status='terkunci'` (`app/Http/Controllers/WebController.php:50-53`). `unlockDeviceFingerprint()` hanya mencari session aktif (`app/Http/Controllers/ManageController.php:406-411`), jadi session yang sudah `terkunci` tidak diubah.
 
@@ -286,7 +286,13 @@ Rekomendasi:
 - Saat unlock, tentukan aksi eksplisit: hapus session terkunci, reset ke aktif, atau tutup sebagai reset.
 - Samakan metrik dashboard antara `users.is_device_locked` dan `sesi_ujians.status`.
 
-### D6 - Kolom lock di session belum konsisten dipakai
+Implementasi:
+- Ditambahkan aksi non-destruktif `Buka Sesi / Lanjutkan` melalui `POST /kelola/sesi/{id}/unlock-resume`.
+- Status `terkunci` dibuka menjadi `aktif` tanpa menghapus jawaban, susunan soal, pending answer Redis, atau `waktu_login`.
+- UI Device Fingerprints sekarang memisahkan `Buka Sesi / Lanjutkan` dari `Reset Ulang dari Nol`.
+- Counter sesi aktif disamakan agar hanya menghitung status `aktif` dan `terkunci`.
+
+### D6 - [SELESAI parsial 2026-06-08] Kolom lock di session belum konsisten dipakai
 
 Migration menambah `is_device_locked` di `sesi_ujians`, tetapi flow utama memakai `users.is_device_locked` dan `sesi_ujians.status='terkunci'`.
 
@@ -295,6 +301,11 @@ Dampak:
 
 Rekomendasi:
 - Pilih satu sumber kebenaran, lalu turunkan status lain dari situ.
+
+Implementasi:
+- Halaman Device Fingerprints sekarang membaca lock dari kombinasi `users.is_device_locked`, `sesi_ujians.is_device_locked`, dan `sesi_ujians.status='terkunci'` untuk menjaga kompatibilitas data lama.
+- Aksi `Buka Sesi / Lanjutkan` membersihkan flag lock user dan sesi sekaligus.
+- Konsolidasi penuh ke satu sumber kebenaran masih bisa dilakukan sebagai refactor lanjutan agar data model lebih sederhana.
 
 ## Security Hardening Lain
 
@@ -376,7 +387,7 @@ Rekomendasi:
 4. Pindahkan validasi device sebelum `ExamService::start()` dan pertahankan HTTP 423.
 5. Hapus debug log dan pemanggilan `owned()` dobel di endpoint soal.
 6. [SELESAI untuk file root] Bersihkan kredensial plaintext di script root; rotasi password tetap wajib dilakukan di luar aplikasi.
-7. Rapikan state unlock: user lock, session `terkunci`, dan counter dashboard harus konsisten.
+7. [SELESAI parsial] Rapikan state unlock: user lock, session `terkunci`, dan counter dashboard harus konsisten.
 8. Jadikan queue/radar/scheduler service yang supervised dan pastikan hanya satu radar worker aktif.
 9. Siapkan maintenance partisi `audit_logs` sebelum 2027-01-01.
 10. Tambahkan pagination/streaming untuk laporan, import, dan legacy management.

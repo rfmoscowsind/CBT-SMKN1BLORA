@@ -47,6 +47,7 @@ Route::prefix('v1')->group(function () {
         Route::delete('/guru/paket-soal/{paket}/soal/{id}', [AdminApiController::class, 'deleteQuestion']);
         Route::post('/admin/jadwal/{id}/regenerate-token', [AdminApiController::class, 'regenerate']);
         Route::post('/pengawas/sesi/{id}/reset', [AdminApiController::class, 'resetSession']);
+        Route::post('/pengawas/sesi/{id}/unlock-resume', [AdminApiController::class, 'unlockSessionForResume']);
     });
     Route::middleware(['auth:api', 'throttle:30,1'])->group(function () {
         Route::get('/laporan/{jadwal}', [OperationsApiController::class, 'report']);

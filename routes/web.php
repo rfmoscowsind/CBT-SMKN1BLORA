@@ -101,12 +101,14 @@ Route::middleware('auth')->group(function () {
     Route::post('/kelola/jadwal', [ManageController::class, 'schedule']);
     Route::post('/kelola/jadwal/{id}/token', [ManageController::class, 'regenerate']);
     Route::post('/kelola/sesi/{id}/reset', [ManageController::class, 'resetSession']);
+    Route::post('/kelola/sesi/{id}/unlock-resume', [ManageController::class, 'unlockSessionForResume']);
     Route::get('/kelola/laporan/{id}/{format}', [ManageController::class, 'report']);
     Route::post('/kelola/grade/{id}', [ManageController::class, 'grade']);
     Route::put('/kelola/user/{id}', [ManageController::class, 'updateUser']);
     Route::delete('/kelola/user/{id}', [ManageController::class, 'deleteUser']);
     Route::put('/kelola/role/{id}/permissions', [ManageController::class, 'syncRolePermissions']);
     Route::get('/kelola/data/device-fingerprints', [ManageController::class, 'deviceFingerprints']);
+    Route::post('/kelola/data/device-lock/toggle', [ManageController::class, 'toggleDeviceLock']);
     Route::post('/kelola/data/device-fingerprints/{id}/unlock', [ManageController::class, 'unlockDeviceFingerprint']);
     Route::post('/kelola/data/device-fingerprints/{id}/lock', [ManageController::class, 'lockDeviceFingerprint']);
     

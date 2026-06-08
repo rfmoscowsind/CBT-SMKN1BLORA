@@ -401,7 +401,7 @@ class ExamService
     {
         $status = DB::table('sesi_ujians')->where('id', $sessionId)->value('status');
 
-        return in_array($status, ['aktif', 'selesai'], true);
+        return in_array($status, ['aktif', 'selesai', 'terkunci'], true);
     }
 
     private function persistAnswerIfNewer(int $sessionId, int $soalId, array $answer, object $question, float|int $score, string $status): bool

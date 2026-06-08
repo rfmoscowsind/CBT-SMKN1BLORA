@@ -560,7 +560,78 @@ class ManageController extends Controller
                 return $row;
             });
 
-        return response()->json(['success' => true, 'data' => $rows]);
+        return response()->json([
+            'success' => true,
+            'data' => $rows,
+            'settings' => [
+                'device_lock_enabled' => $this->deviceLockEnabled(),
+            ],
+        ]);
+    }
+
+    public function toggleDeviceLock(Request $request): JsonResponse
+    {
+        abort_unless(Auth::user()?->role === 'SuperAdmin', 403);
+        $data = $request->validate(['enabled' => ['required', 'boolean']]);
+        $enabled = $this->setDeviceLockEnabled((bool) $data['enabled'], Auth::id());
+
+        return response()->json([
+            'success' => true,
+            'device_lock_enabled' => $enabled,
+            'message' => $enabled
+                ? 'Device Lock diaktifkan. Perubahan perangkat siswa akan diblokir.'
+                : 'Device Lock dimatikan. Perubahan perangkat tetap dicatat tanpa memblokir siswa.',
+        ]);
+    }
+
+    public function unlockSessionForResume(Request $request, int $id): JsonResponse
+    {
+        $this->authorizePermission('monitor-exams', ['SuperAdmin', 'Admin', 'Pengawas']);
+
+        DB::transaction(function () use ($id) {
+            $session = DB::table('sesi_ujians')->where('id', $id)->lockForUpdate()->first();
+            abort_unless($session, 404);
+            abort_if($session->status === 'selesai', 422, 'Sesi sudah selesai. Tidak perlu dibuka.');
+            abort_if($session->status === 'reset', 422, 'Sesi sudah direset dari nol. Siswa harus mulai ulang.');
+
+            DB::table('users')->where('id', $session->user_id)->update([
+                'device_fingerprint' => null,
+                'device_fingerprint_raw' => null,
+                'is_device_locked' => false,
+                'updated_at' => now(),
+            ]);
+
+            DB::table('sesi_ujians')->where('id', $id)->update([
+                'status' => 'aktif',
+                'waktu_submit' => null,
+                'device_fingerprint' => null,
+                'device_fingerprint_raw' => null,
+                'is_device_locked' => false,
+                'last_seen_at' => null,
+                'updated_at' => now(),
+            ]);
+
+            DB::table('session_events')->insert([
+                'sesi_ujian_id' => $id,
+                'event_type' => 'session_resume_unlock',
+                'event_data' => json_encode([
+                    'actor_id' => Auth::id(),
+                    'non_destructive' => true,
+                    'preserved_answers' => true,
+                    'preserved_started_at' => $session->waktu_login,
+                ]),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            Redis::del("cbt:session:online:$id");
+            Redis::del("cbt:ping:db:$id");
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Sesi berhasil dibuka. Jawaban tetap aman dan siswa bisa melanjutkan ujian.',
+        ]);
     }
 
     public function unlockDeviceFingerprint(int $id): JsonResponse
