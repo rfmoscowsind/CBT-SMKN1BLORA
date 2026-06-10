@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ScheduleBatchService;
 use Carbon\Carbon;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
@@ -82,6 +83,11 @@ class ScheduleManagementController extends Controller
                     return $master;
                 }),
             'classes'   => DB::table('kelas_aktifs')->orderBy('nama_kelas')->get(['id', 'nama_kelas']),
+            'tingkats'  => DB::table('tingkats')
+                ->orderBy('nama_tingkat')
+                ->get(['id', 'nama_tingkat as nama']),
+            'jurusans'  => DB::table('jurusans')->orderBy('nama_jurusan')->get(['id', 'kode_jurusan', 'nama_jurusan']),
+            'rombels'   => DB::table('rombels')->orderBy('nama_rombel')->get(['id', 'nama_rombel']),
             'schedules' => $schedules,
         ]);
     }
@@ -314,6 +320,70 @@ class ScheduleManagementController extends Controller
         return $this->ok();
     }
 
+    public function previewBatch(Request $request): JsonResponse
+    {
+        $this->authorizeSchedules();
+        $data = $this->validateBatchRequest($request);
+
+        $service = new ScheduleBatchService();
+        $result = $service->expand($data['header'], $data['groups']);
+
+        if (!empty($result['errors'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi batch gagal.',
+                'errors' => $result['errors'],
+            ], 422);
+        }
+
+        $conflictErrors = $service->checkConflicts($result['items']);
+        if (!empty($conflictErrors)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ditemukan jadwal yang bentrok.',
+                'errors' => $conflictErrors,
+            ], 422);
+        }
+
+        return $this->ok([
+            'items' => $result['items'],
+            'count' => count($result['items']),
+        ]);
+    }
+
+    public function storeBatch(Request $request): JsonResponse
+    {
+        $this->authorizeSchedules();
+        $data = $this->validateBatchRequest($request);
+
+        $service = new ScheduleBatchService();
+        $result = $service->expand($data['header'], $data['groups']);
+
+        if (!empty($result['errors'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi batch gagal.',
+                'errors' => $result['errors'],
+            ], 422);
+        }
+
+        $conflictErrors = $service->checkConflicts($result['items']);
+        if (!empty($conflictErrors)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ditemukan jadwal yang bentrok.',
+                'errors' => $conflictErrors,
+            ], 422);
+        }
+
+        $created = $service->store($result['items']);
+
+        return $this->ok([
+            'created' => $created,
+            'count' => count($created),
+        ], 201);
+    }
+
     private function clearDeletedScheduleCache(array $sessionIds): void
     {
         foreach (array_chunk($sessionIds, 100) as $chunk) {
@@ -349,5 +419,46 @@ class ScheduleManagementController extends Controller
     {
         return response()->json(['success' => true, 'data' => $data], $status);
     }
-}
 
+    private function validateBatchRequest(Request $request): array
+    {
+        $validator = Validator::make($request->all(), [
+            'header.nama_batch' => ['required', 'string', 'max:255'],
+            'header.tingkat' => ['required', 'integer', 'exists:tingkats,id'],
+            'header.gunakan_token' => ['required', 'boolean'],
+            'header.token' => ['required_if:header.gunakan_token,true', 'nullable', 'string', 'regex:/^[A-Z0-9]+$/', 'max:20'],
+            'header.default_waktu_mulai' => ['required', 'date'],
+            'header.default_waktu_selesai' => ['required', 'date', 'after:header.default_waktu_mulai'],
+            'header.default_durasi_menit' => ['required', 'integer', 'min:1'],
+            'header.default_acak_soal' => ['required', 'boolean'],
+            'header.default_acak_opsi' => ['required', 'boolean'],
+            'header.default_tampilkan_nilai_akhir' => ['required', 'boolean'],
+            'header.default_hasil_visibilitas' => ['required', 'in:instant,manual,scheduled'],
+            'header.default_tanggal_rilis_hasil' => ['nullable', 'date', 'required_if:header.default_hasil_visibilitas,scheduled'],
+            'groups' => ['required', 'array', 'min:1'],
+            'groups.*.jurusan_id' => ['required', 'integer', 'exists:jurusans,id'],
+            'groups.*.rombel_ids' => ['required', 'array', 'min:1'],
+            'groups.*.rombel_ids.*' => ['integer', 'exists:rombels,id'],
+            'groups.*.paket_soal_id' => ['required', 'integer', 'exists:paket_soals,id'],
+            'groups.*.override' => ['nullable', 'boolean'],
+            'groups.*.waktu_mulai' => ['nullable', 'date', 'required_if:groups.*.override,true'],
+            'groups.*.waktu_selesai' => ['nullable', 'date', 'after:groups.*.waktu_mulai', 'required_if:groups.*.override,true'],
+            'groups.*.durasi_menit' => ['nullable', 'integer', 'min:1'],
+            'groups.*.acak_soal' => ['nullable', 'boolean'],
+            'groups.*.acak_opsi' => ['nullable', 'boolean'],
+            'groups.*.tampilkan_nilai_akhir' => ['nullable', 'boolean'],
+            'groups.*.hasil_visibilitas' => ['nullable', 'in:instant,manual,scheduled'],
+            'groups.*.tanggal_rilis_hasil' => ['nullable', 'date'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new HttpResponseException(response()->json([
+                'success' => false,
+                'message' => 'Data batch belum valid.',
+                'errors' => $validator->errors(),
+            ], 422));
+        }
+
+        return $validator->validated();
+    }
+}

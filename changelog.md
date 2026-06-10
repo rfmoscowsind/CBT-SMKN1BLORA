@@ -1,5 +1,129 @@
 # Changelog
 
+## 2026-06-10 - Implementasi Fitur Batch Jadwal Multi-Grup
+
+### Added
+
+**Backend:**
+- Tambah endpoint `POST /kelola/data/jadwal-ujian/batch/preview` untuk preview jadwal batch sebelum submit.
+- Tambah endpoint `POST /kelola/data/jadwal-ujian/batch` untuk submit dan membuat jadwal batch.
+- Tambah `use App\Services\ScheduleBatchService` di `ScheduleManagementController`.
+- Tambah method `previewBatch()` dan `storeBatch()` di `ScheduleManagementController`.
+- Tambah method `validateBatchRequest()` untuk validasi payload batch dengan aturan:
+  - Header batch: nama_batch, tingkat, token, waktu default, durasi, opsi acak, visibilitas hasil.
+  - Groups: jurusan_id, rombel_ids (array), paket_soal_id, override, dan pengaturan khusus jika override aktif.
+- Service `ScheduleBatchService` sudah tersedia dengan method:
+  - `expand()`: expand grup menjadi daftar jadwal per kelas dengan validasi paket ready, durasi, bentrok internal batch.
+  - `checkConflicts()`: cek bentrok jadwal dengan jadwal aktif yang ada di database.
+  - `store()`: simpan jadwal batch dengan auto create/reuse master ujian berdasarkan kombinasi unik.
+- Tambah data tingkat, jurusan, rombel di response `index()` untuk mendukung dropdown batch modal.
+
+**Frontend (ExamSchedule.vue):**
+- Tambah tombol "Buat Jadwal Batch" dengan icon layer-group di halaman Jadwal Aktif.
+- Ubah tombol "Buat Jadwal Baru" menjadi "Buat Jadwal Tunggal" untuk membedakan dengan batch.
+- Tambah modal batch multi-grup dengan komponen:
+  - **Header Batch**: nama batch, tingkat, token, waktu/durasi/opsi default, visibilitas hasil.
+  - **Form Tambah Grup**: jurusan, rombel multi-select, paket soal, override untuk pengaturan khusus per grup.
+  - **Tabel Grup**: preview grup yang sudah ditambahkan dengan tombol hapus per grup.
+  - **Preview Jadwal**: menampilkan expand hasil jadwal yang akan dibuat sebelum submit.
+- Implementasi logic:
+  - `openBatchModal()`: reset form dan buka modal batch.
+  - `generateBatchToken()`: generate token random 6 karakter A-Z0-9.
+  - `tambahGrup()`: tambah grup ke array `batchGroups` dengan validasi form.
+  - `hapusGrup()`: hapus grup dari array.
+  - `previewBatch()`: panggil endpoint preview dan tampilkan hasil expand.
+  - `submitBatch()`: submit batch setelah konfirmasi user.
+- Tambah ref reactive:
+  - `batchForm`: header batch.
+  - `grupForm`: form tambah grup.
+  - `batchGroups`: array grup yang sudah ditambahkan.
+  - `batchPreview`: array hasil preview expand.
+  - `tingkatList`, `jurusanList`, `rombelList`: data master untuk dropdown.
+- Tambah styling:
+  - `.modal-batch`: modal lebih lebar (max-width 900px).
+  - `.batch-section`: section dengan border dan background.
+  - `.override-section`: section override dengan border biru.
+  - `.preview-item`: item preview dengan border bottom.
+
+**Routes:**
+- Tambah route `POST /kelola/data/jadwal-ujian/batch/preview` → `ScheduleManagementController@previewBatch`.
+- Tambah route `POST /kelola/data/jadwal-ujian/batch` → `ScheduleManagementController@storeBatch`.
+
+### Fixed
+
+- Fix bug mass-delete: tambah route `POST /kelola/data/jadwal-ujian/mass-delete` untuk menyamakan dengan frontend yang memanggil POST, selain route DELETE yang sudah ada.
+
+### Changed
+
+- Response `index()` di `ScheduleManagementController` sekarang mengembalikan data tambahan:
+  - `tingkats`: list tingkat untuk dropdown batch.
+  - `jurusans`: list jurusan untuk dropdown batch.
+  - `rombels`: list rombel untuk dropdown batch.
+
+### How It Works
+
+1. **Alur Batch:**
+   - Admin klik "Buat Jadwal Batch".
+   - Isi header batch (nama, tingkat, token, waktu/durasi/opsi default).
+   - Tambah satu atau lebih grup (jurusan, rombel multi-select, paket soal).
+   - Grup bisa gunakan override untuk pengaturan khusus berbeda dari default.
+   - Klik "Preview" untuk melihat expand jadwal yang akan dibuat.
+   - Klik "Submit Batch" untuk membuat semua jadwal sekaligus.
+
+2. **Token Batch:**
+   - Semua jadwal dalam satu batch memakai token yang sama.
+   - Token default auto-generate 6 karakter A-Z0-9.
+   - Token bisa diubah manual atau generate ulang.
+
+3. **Master Ujian:**
+   - Master ujian dibuat/reuse otomatis berdasarkan kombinasi:
+     - `paket_soal_id`, `acak_soal`, `acak_opsi`, `tampilkan_nilai_akhir`, `hasil_visibilitas`, `tanggal_rilis_hasil`.
+   - Jika kombinasi sudah ada, pakai master lama.
+   - Jika belum ada, buat master baru.
+
+4. **Validasi:**
+   - Paket soal wajib status `ready`.
+   - Durasi tidak boleh melebihi rentang waktu mulai-selesai.
+   - Visibilitas `scheduled` wajib punya tanggal rilis hasil.
+   - Cek bentrok jadwal dengan jadwal aktif yang ada.
+   - Cek duplikat kelas dalam batch yang sama pada waktu yang sama.
+
+5. **Hasil Akhir:**
+   - Setiap rombel dalam grup menjadi 1 row `jadwal_ujians`.
+   - Contoh: Grup DKV rombel 1,2 + Grup TAV rombel 1,2,3 = 5 jadwal.
+
+### Database Impact
+
+- Tidak ada perubahan struktur database (Tahap 1 implementasi).
+- Jadwal tetap dibuat per kelas di `jadwal_ujians`.
+- Tabel `jadwal_batches` opsional untuk tahap berikutnya.
+
+### Verification
+
+- Backend:
+  - `ScheduleManagementController.php`: method `previewBatch()`, `storeBatch()`, `validateBatchRequest()` ditambahkan.
+  - `ScheduleBatchService.php`: sudah tersedia dengan logic expand, check conflicts, store.
+  - Routes batch terdaftar di `web.php`.
+- Frontend:
+  - `ExamSchedule.vue`: modal batch, form grup, preview, submit batch diimplementasi.
+  - UI responsive dengan modal lebar 900px.
+  - Token auto-generate dan manual edit tersedia.
+- Flow:
+  - Admin bisa membuat banyak jadwal dalam satu kali submit.
+  - Semua jadwal memakai token yang sama.
+  - Master ujian auto create/reuse.
+  - Validasi bentrok dan duplikat diterapkan.
+
+### Next Steps (Tahap 2 - Opsional)
+
+- Tambah tabel `jadwal_batches` untuk grouping permanen.
+- Tambah kolom `batch_id` di `jadwal_ujians`.
+- Filter jadwal berdasarkan batch.
+- Regenerate token satu batch bersama.
+- Archive/delete satu batch sekaligus.
+
+---
+
 ## 2026-06-09 - Generate siswa kelas 10 DKV 1
 
 ### Data

@@ -102,9 +102,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/kelola/data/master-ujian', [ScheduleManagementController::class, 'storeMaster']);
     Route::put('/kelola/data/master-ujian/{id}', [ScheduleManagementController::class, 'updateMaster']);
     Route::post('/kelola/data/jadwal-ujian', [ScheduleManagementController::class, 'storeSchedule']);
+    Route::post('/kelola/data/jadwal-ujian/batch/preview', [ScheduleManagementController::class, 'previewBatch']);
+    Route::post('/kelola/data/jadwal-ujian/batch', [ScheduleManagementController::class, 'storeBatch']);
     Route::put('/kelola/data/jadwal-ujian/{id}', [ScheduleManagementController::class, 'updateSchedule']);
     Route::post('/kelola/data/jadwal-ujian/{id}/archive', [ScheduleManagementController::class, 'archive']);
     Route::post('/kelola/data/jadwal-ujian/{id}/token', [ScheduleManagementController::class, 'regenerateToken']);
+    Route::post('/kelola/data/jadwal-ujian/mass-delete', [ScheduleManagementController::class, 'massDestroy']);
     Route::delete('/kelola/data/jadwal-ujian', [ScheduleManagementController::class, 'massDestroy']);
     Route::delete('/kelola/data/jadwal-ujian/{id}', [ScheduleManagementController::class, 'destroy']);
     Route::get('/kelola/data/hasil-ujian/options', [ExamResultManagementController::class, 'options']);
