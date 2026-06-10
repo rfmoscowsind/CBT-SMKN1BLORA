@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
@@ -17,8 +18,6 @@ class ScheduleManagementController extends Controller
     {
         $this->authorizeSchedules();
 
-        // FIX: Batch-hitung status canArchive sebelum loop map(),
-        // bukan 2 query per jadwal di dalam loop.
         $rawSchedules = DB::table('jadwal_ujians as j')
             ->join('master_ujians as m', 'm.id', '=', 'j.master_ujian_id')
             ->join('jadwal_ujian_kelas as jk', 'jk.jadwal_ujian_id', '=', 'j.id')
@@ -37,28 +36,10 @@ class ScheduleManagementController extends Controller
                 'j.token',
             ]);
 
-        $scheduleIds = $rawSchedules->pluck('id');
-
-        // 1 query untuk jumlah target kelas per jadwal
-        $targetCounts = DB::table('jadwal_ujian_kelas')
-            ->whereIn('jadwal_ujian_id', $scheduleIds)
-            ->selectRaw('jadwal_ujian_id, count(*) as cnt')
-            ->groupBy('jadwal_ujian_id')
-            ->pluck('cnt', 'jadwal_ujian_id');
-
-        // 1 query untuk jumlah download per jadwal
-        $downloadCounts = DB::table('hasil_ujian_unduhans')
-            ->whereIn('jadwal_ujian_id', $scheduleIds)
-            ->selectRaw('jadwal_ujian_id, count(*) as cnt')
-            ->groupBy('jadwal_ujian_id')
-            ->pluck('cnt', 'jadwal_ujian_id');
-
-        $schedules = $rawSchedules->map(function ($schedule) use ($targetCounts, $downloadCounts) {
+        $schedules = $rawSchedules->map(function ($schedule) {
             $schedule->waktu_mulai    = Carbon::parse($schedule->waktu_mulai, 'UTC')->timezone('Asia/Jakarta')->format('Y-m-d H:i:s');
             $schedule->waktu_selesai  = Carbon::parse($schedule->waktu_selesai, 'UTC')->timezone('Asia/Jakarta')->format('Y-m-d H:i:s');
-            $targets   = $targetCounts->get($schedule->id, 0);
-            $downloads = $downloadCounts->get($schedule->id, 0);
-            $schedule->bisa_diarsipkan = $targets > 0 && $downloads >= $targets;
+            $schedule->bisa_diarsipkan = true;
 
             return $schedule;
         });
@@ -247,31 +228,106 @@ class ScheduleManagementController extends Controller
         return $this->ok(['id' => $id]);
     }
 
-    public function destroy(int $id): JsonResponse
+    public function massDestroy(Request $request): JsonResponse
+    {
+        $this->authorizeSchedules();
+        $data = $this->validateJson($request, [
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['integer', 'exists:jadwal_ujians,id'],
+        ]);
+
+        $ids = $data['ids'];
+        $allSessionIds = collect();
+
+        DB::transaction(function () use ($ids, &$allSessionIds) {
+            foreach ($ids as $id) {
+                $schedule = DB::table('jadwal_ujians')->whereNull('diarsipkan_at')->find($id);
+                if (!$schedule) {
+                    continue;
+                }
+
+                $sessionIds = DB::table('sesi_ujians')
+                    ->where('jadwal_ujian_id', $id)
+                    ->pluck('id');
+
+                $allSessionIds = $allSessionIds->merge($sessionIds);
+
+                if ($sessionIds->isNotEmpty()) {
+                    DB::table('session_events')->whereIn('sesi_ujian_id', $sessionIds)->delete();
+                    DB::table('audit_logs')->whereIn('sesi_ujian_id', $sessionIds)->delete();
+                    DB::table('jawaban_siswas')->whereIn('sesi_ujian_id', $sessionIds)->delete();
+                    DB::table('sesi_ujian_soals')->whereIn('sesi_ujian_id', $sessionIds)->delete();
+                    DB::table('sesi_ujians')->whereIn('id', $sessionIds)->delete();
+                }
+
+                DB::table('hasil_ujian_unduhans')->where('jadwal_ujian_id', $id)->delete();
+                DB::table('jadwal_ujian_kelas')->where('jadwal_ujian_id', $id)->delete();
+                DB::table('jadwal_ujians')->where('id', $id)->delete();
+            }
+        });
+
+        $this->clearDeletedScheduleCache($allSessionIds->all());
+
+        return $this->ok(['deleted' => count($ids)]);
+    }
+
+    public function archive(int $id): JsonResponse
     {
         $this->authorizeSchedules();
         $schedule = DB::table('jadwal_ujians')->whereNull('diarsipkan_at')->find($id);
         abort_unless($schedule, 404);
-        abort_unless($this->canArchive($id), 422, 'Download PDF hasil seluruh kelas target sebelum mengarsipkan jadwal.');
+
         DB::table('jadwal_ujians')->where('id', $id)->update([
             'diarsipkan_at' => now(),
-            'updated_at' => now(),
+            'updated_at'    => now(),
         ]);
 
         return $this->ok();
     }
 
-    private function canArchive(int $id): bool
+    public function destroy(int $id): JsonResponse
     {
-        $targets = DB::table('jadwal_ujian_kelas')->where('jadwal_ujian_id', $id)->count();
-        $downloads = DB::table('hasil_ujian_unduhans')->where('jadwal_ujian_id', $id)->count();
+        $this->authorizeSchedules();
+        $schedule = DB::table('jadwal_ujians')->whereNull('diarsipkan_at')->find($id);
+        abort_unless($schedule, 404);
 
-        return $targets > 0 && $downloads >= $targets;
+        $sessionIds = DB::table('sesi_ujians')
+            ->where('jadwal_ujian_id', $id)
+            ->pluck('id');
+
+        DB::transaction(function () use ($id, $sessionIds) {
+            if ($sessionIds->isNotEmpty()) {
+                DB::table('session_events')->whereIn('sesi_ujian_id', $sessionIds)->delete();
+                DB::table('audit_logs')->whereIn('sesi_ujian_id', $sessionIds)->delete();
+                DB::table('jawaban_siswas')->whereIn('sesi_ujian_id', $sessionIds)->delete();
+                DB::table('sesi_ujian_soals')->whereIn('sesi_ujian_id', $sessionIds)->delete();
+                DB::table('sesi_ujians')->whereIn('id', $sessionIds)->delete();
+            }
+
+            DB::table('hasil_ujian_unduhans')->where('jadwal_ujian_id', $id)->delete();
+            DB::table('jadwal_ujian_kelas')->where('jadwal_ujian_id', $id)->delete();
+            DB::table('jadwal_ujians')->where('id', $id)->delete();
+        });
+
+        $this->clearDeletedScheduleCache($sessionIds->all());
+
+        return $this->ok();
+    }
+
+    private function clearDeletedScheduleCache(array $sessionIds): void
+    {
+        foreach (array_chunk($sessionIds, 100) as $chunk) {
+            try {
+                Redis::del(array_map(fn ($sessionId) => "queue_jawaban:{$sessionId}", $chunk));
+            } catch (\Throwable) {
+                break;
+            }
+        }
     }
 
     private function authorizeSchedules(): void
     {
-        // FIX: Hapus ->fresh() — gunakan ->can() yang memanfaatkan Spatie cache.
+        // FIX: Hapus ->fresh() ??? gunakan ->can() yang memanfaatkan Spatie cache.
         abort_unless(Auth::user()?->can('manage-schedules'), 403);
     }
 
@@ -294,3 +350,4 @@ class ScheduleManagementController extends Controller
         return response()->json(['success' => true, 'data' => $data], $status);
     }
 }
+

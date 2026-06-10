@@ -75,26 +75,54 @@
                             <h6 class="fw-bold mb-0">Jadwal Ujian Aktif</h6>
                             <small class="text-muted">Generate token dan atur waktu pelaksanaan ujian</small>
                         </div>
-                        <button class="btn btn-success" @click="openJadwalModal()">
-                            <i class="fa-solid fa-plus me-1"></i> Buat Jadwal Baru
-                        </button>
+                        <div class="d-flex gap-2">
+                            <button
+                                class="btn btn-danger"
+                                :disabled="selectedJadwalIds.length === 0"
+                                @click="massDeleteJadwal"
+                            >
+                                <i class="fa-solid fa-trash-can me-1"></i>
+                                Hapus Terpilih
+                                <span v-if="selectedJadwalIds.length > 0" class="badge bg-white text-danger ms-1">{{ selectedJadwalIds.length }}</span>
+                            </button>
+                            <button class="btn btn-success" @click="openJadwalModal()">
+                                <i class="fa-solid fa-plus me-1"></i> Buat Jadwal Baru
+                            </button>
+                        </div>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-custom table-hover mb-0">
                             <thead>
                                 <tr>
-                                    <th width="5%">No</th>
+                                    <th width="3%" class="text-center">
+                                        <input
+                                            type="checkbox"
+                                            class="form-check-input"
+                                            :checked="isAllJadwalSelected"
+                                            :indeterminate.prop="isSomeJadwalSelected"
+                                            @change="toggleSelectAllJadwal"
+                                        >
+                                    </th>
+                                    <th width="4%">No</th>
                                     <th width="20%">Ujian</th>
                                     <th width="12%">Kelas</th>
-                                    <th width="14%">Mulai</th>
-                                    <th width="14%">Selesai</th>
+                                    <th width="13%">Mulai</th>
+                                    <th width="13%">Selesai</th>
                                     <th width="8%">Durasi</th>
                                     <th width="10%">Token</th>
                                     <th width="17%" class="text-center">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="(j, idx) in jadwalList" :key="j.id">
+                                <tr v-for="(j, idx) in jadwalList" :key="j.id" :class="{ 'table-active': selectedJadwalIds.includes(j.id) }">
+                                    <td class="text-center">
+                                        <input
+                                            type="checkbox"
+                                            class="form-check-input"
+                                            :value="j.id"
+                                            v-model="selectedJadwalIds"
+                                        >
+                                    </td>
                                     <td>{{ idx + 1 }}</td>
                                     <td class="fw-semibold">{{ j.ujian }}</td>
                                     <td>{{ j.kelas }}</td>
@@ -109,13 +137,13 @@
                                         <button class="btn btn-sm btn-outline-primary me-1" @click="openJadwalModal(j)">
                                             <i class="fa-solid fa-pen-to-square"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-outline-danger" :disabled="!j.bisaDiarsipkan" :title="j.bisaDiarsipkan ? 'Arsipkan jadwal' : 'Download PDF hasil terlebih dahulu'" @click="deleteJadwal(j)">
+                                        <button class="btn btn-sm btn-outline-danger" title="Hapus jadwal" @click="deleteJadwal(j)">
                                             <i class="fa-solid fa-trash-can"></i>
                                         </button>
                                     </td>
                                 </tr>
                                 <tr v-if="jadwalList.length === 0">
-                                    <td colspan="8" class="text-center text-muted py-4"><i class="fa-solid fa-inbox fa-2x mb-2 d-block"></i> Belum ada jadwal ujian.</td>
+                                    <td colspan="9" class="text-center text-muted py-4"><i class="fa-solid fa-inbox fa-2x mb-2 d-block"></i> Belum ada jadwal ujian.</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -232,7 +260,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import axios from 'axios';
 import Swal from 'sweetalert2';
 import AdminSidebar from '../../components/AdminSidebar.vue';
@@ -249,6 +277,32 @@ const paketList = ref([]);
 const kelasList = ref([]);
 const masterList = ref([]);
 const jadwalList = ref([]);
+const selectedJadwalIds = ref([]);
+
+const isAllJadwalSelected = computed(() =>
+    jadwalList.value.length > 0 && selectedJadwalIds.value.length === jadwalList.value.length
+);
+const isSomeJadwalSelected = computed(() =>
+    selectedJadwalIds.value.length > 0 && selectedJadwalIds.value.length < jadwalList.value.length
+);
+const toggleSelectAllJadwal = () => {
+    selectedJadwalIds.value = isAllJadwalSelected.value ? [] : jadwalList.value.map(j => j.id);
+};
+const massDeleteJadwal = async () => {
+    const count = selectedJadwalIds.value.length;
+    if (!(await confirmAction({
+        title: `Hapus ${count} jadwal?`,
+        text: 'Semua jadwal terpilih beserta data sesi dan jawaban terkait akan dihapus permanen.',
+        confirmButtonText: 'Ya, hapus semua',
+        danger: true,
+    }))) return;
+    try {
+        await axios.post('/kelola/data/jadwal-ujian/mass-delete', { ids: selectedJadwalIds.value });
+        selectedJadwalIds.value = [];
+        await loadData();
+        notifySuccess('Berhasil', `${count} jadwal dihapus.`);
+    } catch (error) { notifyError(errorMessage(error)); }
+};
 
 const errorMessage = error => Object.values(error.response?.data?.errors || {}).flat()[0] || error.response?.data?.message || 'Permintaan gagal diproses.';
 const notifySuccess = (title, text = '') => Swal.fire({ title, text, icon: 'success', timer: 1400, showConfirmButton: false });
@@ -354,9 +408,8 @@ const regenerateToken = async j => {
     catch (error) { notifyError(errorMessage(error)); }
 };
 const deleteJadwal = async j => {
-    if (!j.bisaDiarsipkan) return notifyError('Download PDF hasil ujian terlebih dahulu agar jadwal dapat diarsipkan.', 'Belum bisa diarsipkan');
-    if (!(await confirmAction({ title: 'Arsipkan jadwal?', text: 'Riwayat sesi dan jawaban tetap disimpan.', confirmButtonText: 'Ya, arsipkan', danger: true }))) return;
-    try { await axios.delete(`/kelola/data/jadwal-ujian/${j.id}`); await loadData(); notifySuccess('Berhasil', 'Jadwal diarsipkan.'); }
+    if (!(await confirmAction({ title: 'Hapus jadwal?', text: 'Jadwal dan data hasil/sesi terkait akan dihapus. User, mapel, paket soal, bank soal, dan master ujian tetap disimpan.', confirmButtonText: 'Ya, hapus', danger: true }))) return;
+    try { await axios.delete(`/kelola/data/jadwal-ujian/${j.id}`); await loadData(); notifySuccess('Berhasil', 'Jadwal dihapus.'); }
     catch (error) { notifyError(errorMessage(error)); }
 };
 const logout = async () => { if (await confirmAction({ title: 'Keluar?', text: 'Anda akan keluar dari sistem.', confirmButtonText: 'Keluar' })) window.location.href = '/logout'; };

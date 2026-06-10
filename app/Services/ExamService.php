@@ -3,9 +3,12 @@
 namespace App\Services;
 
 use App\Jobs\PersistAnswerSnapshot;
+use App\Jobs\PersistSessionAnswersSnapshot;
 use App\Models\User;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 
@@ -92,6 +95,7 @@ class ExamService
 
                 $sessionId = (int) $existing->id;
                 Redis::del("queue_jawaban:$sessionId");
+                $this->forgetHotCache("session_soals:$sessionId");
                 DB::table('jawaban_siswas')->where('sesi_ujian_id', $sessionId)->delete();
                 DB::table('sesi_ujian_soals')->where('sesi_ujian_id', $sessionId)->delete();
                 DB::table('sesi_ujians')->where('id', $sessionId)->update([
@@ -162,6 +166,8 @@ class ExamService
                 DB::table('sesi_ujian_soals')->insert($rows);
             }
 
+            $this->forgetHotCache("session_soals:$sessionId");
+
             $this->event($sessionId, $existing ? 'login_after_reset' : 'login', ['ip' => $ip, 'user_agent' => $ua]);
 
             return DB::table('sesi_ujians')->find($sessionId);
@@ -199,19 +205,20 @@ class ExamService
     /**
      * Hitung sisa waktu ujian dalam detik.
      *
-     * FIX (Issue #6): Gunakan static cache per-request untuk menghindari query
-     * duplikat DB::table('jadwal_ujians')->find() setiap kali remaining() dipanggil
-     * (dipanggil di show(), save(), sync() — bisa 3x per request).
+     * Gunakan request-scoped cache agar aman di worker long-running/Octane.
      */
     public function remaining(object $s): int
     {
-        static $cache = [];
+        $key = 'exam.schedule.remaining.' . $s->jadwal_ujian_id;
 
-        $key = 'jadwal_' . $s->jadwal_ujian_id;
-        if (!array_key_exists($key, $cache)) {
-            $cache[$key] = DB::table('jadwal_ujians')->find($s->jadwal_ujian_id);
+        if (app()->bound($key)) {
+            $j = app($key);
+        } else {
+            $j = DB::table('jadwal_ujians')->find($s->jadwal_ujian_id);
+            app()->instance($key, $j);
         }
-        $j = $cache[$key];
+
+        abort_unless($j, 404, 'Jadwal ujian tidak ditemukan.');
 
         $deadline = min(
             now()->parse($j->waktu_selesai),
@@ -228,34 +235,14 @@ class ExamService
     {
         abort_if($s->status !== 'aktif' || $this->remaining($s) <= 0, 410, 'Sesi ujian selesai.');
 
-        $qData = \Illuminate\Support\Facades\Cache::remember("bank_soal:{$soalId}:v2", 7200, function () use ($soalId) {
-            $row = DB::table('bank_soals')->find($soalId);
-
-            return $row ? [
-                'id' => (int) $row->id,
-                'tipe_soal' => $row->tipe_soal,
-                'bobot_nilai' => $row->bobot_nilai,
-            ] : null;
-        });
-        $q = $qData ? (object) $qData : null;
-
-        $sessionSoalIds = \Illuminate\Support\Facades\Cache::remember("session_soals:{$s->id}", 7200, function () use ($s) {
-            return DB::table('sesi_ujian_soals')
-                ->where('sesi_ujian_id', $s->id)
-                ->pluck('bank_soal_id')
-                ->all();
-        });
+        $q = $this->questionMetadata($soalId);
+        $sessionSoalIds = $this->sessionQuestionIds($s);
 
         $existsInSession = $q && in_array($soalId, $sessionSoalIds, true);
         abort_unless($existsInSession, 403);
 
         if ($opsiId !== null) {
-            $validOptionIds = \Illuminate\Support\Facades\Cache::remember("opsi_soal:{$soalId}", 7200, function () use ($soalId) {
-                return DB::table('opsi_jawabans')
-                    ->where('bank_soal_id', $soalId)
-                    ->pluck('id')
-                    ->all();
-            });
+            $validOptionIds = $this->optionIdsForQuestion($soalId);
 
             abort_unless(
                 in_array($opsiId, $validOptionIds, true),
@@ -276,11 +263,249 @@ class ExamService
             'server_updated_at' => $received,
         ];
 
-        Redis::hset("queue_jawaban:{$s->id}", (string) $q->id, json_encode($payload));
-        Redis::expire("queue_jawaban:{$s->id}", 86400);
-        PersistAnswerSnapshot::dispatch($s->id, $q->id)->onQueue('answers');
+        $this->bufferAnswer($s, $q, $payload);
 
         return ['server_updated_at' => $received];
+    }
+
+    /**
+     * Simpan banyak jawaban dari sync/reconnect dengan satu Redis pipeline dan satu flush job.
+     */
+    public function saveMany(object $s, array $answers): array
+    {
+        abort_if($s->status !== 'aktif' || $this->remaining($s) <= 0, 410, 'Sesi ujian selesai.');
+
+        $answers = array_values(array_filter($answers, 'is_array'));
+        $received = now()->toISOString();
+        $sessionSoalIds = $this->sessionQuestionIds($s);
+        $questionIds = array_values(array_unique(array_map(
+            fn (array $answer) => (int) ($answer['bank_soal_id'] ?? 0),
+            $answers
+        )));
+        $questionIds = array_values(array_filter($questionIds));
+
+        if (empty($questionIds)) {
+            return ['server_updated_at' => $received, 'saved' => 0];
+        }
+
+        $questions = DB::table('bank_soals')
+            ->whereIn('id', $questionIds)
+            ->get(['id', 'tipe_soal', 'bobot_nilai'])
+            ->keyBy('id');
+
+        $optionIds = DB::table('opsi_jawabans')
+            ->whereIn('bank_soal_id', $questionIds)
+            ->get(['id', 'bank_soal_id'])
+            ->groupBy('bank_soal_id')
+            ->map(fn ($rows) => $rows->pluck('id')->map(fn ($id) => (int) $id)->all())
+            ->all();
+
+        $payloads = [];
+        $prepared = [];
+        $processed = 0;
+
+        foreach ($answers as $answer) {
+            $soalId = (int) ($answer['bank_soal_id'] ?? 0);
+            if ($soalId <= 0) {
+                continue;
+            }
+
+            $q = $questions->get($soalId);
+            abort_unless($q && in_array($soalId, $sessionSoalIds, true), 403);
+
+            $opsiId = $answer['opsi_jawaban_id'] ?? null;
+            $opsiId = $opsiId !== null ? (int) $opsiId : null;
+            if ($opsiId !== null) {
+                abort_unless(
+                    in_array($opsiId, $optionIds[$soalId] ?? [], true),
+                    422,
+                    'Opsi jawaban tidak sesuai soal.'
+                );
+            }
+
+            $payload = [
+                'sesi_ujian_id'     => $s->id,
+                'user_id'           => $s->user_id,
+                'bank_soal_id'      => (int) $q->id,
+                'opsi_jawaban_id'   => $opsiId,
+                'jawaban_essay'     => $answer['jawaban_essay'] ?? null,
+                'tipe_soal'         => $q->tipe_soal,
+                'client_updated_at' => $answer['client_updated_at'] ?? null,
+                'server_updated_at' => $received,
+            ];
+
+            $field = (string) $q->id;
+            $payloads[$field] = json_encode($payload);
+            $prepared[$field] = [$q, $payload];
+            $processed++;
+        }
+
+        if (empty($payloads)) {
+            return ['server_updated_at' => $received, 'saved' => 0];
+        }
+
+        $key = "queue_jawaban:{$s->id}";
+
+        try {
+            Redis::pipeline(function ($pipe) use ($key, $payloads): void {
+                foreach ($payloads as $field => $payload) {
+                    $pipe->hset($key, $field, $payload);
+                }
+                $pipe->expire($key, 86400);
+            });
+
+            PersistSessionAnswersSnapshot::dispatch((int) $s->id)->onQueue('answers');
+        } catch (\Throwable $exception) {
+            Log::error('Redis answer buffer unavailable during batch save; persisting directly', [
+                'session_id' => $s->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            $correctOptions = $this->correctOptionIdsForQuestions($questionIds);
+
+            foreach ($prepared as [$q, $payload]) {
+                $this->persistPreparedAnswer(
+                    (int) $s->id,
+                    (int) $q->id,
+                    $payload,
+                    $q,
+                    $correctOptions[(int) $q->id] ?? null
+                );
+            }
+        }
+
+        return ['server_updated_at' => $received, 'saved' => $processed];
+    }
+
+    private function rememberHotValue(string $key, int $seconds, callable $resolver): mixed
+    {
+        try {
+            return Cache::remember($key, $seconds, $resolver);
+        } catch (\Throwable $exception) {
+            Log::warning('Cache unavailable for exam hot path', [
+                'key' => $key,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return $resolver();
+        }
+    }
+
+    private function forgetHotCache(string $key): void
+    {
+        try {
+            Cache::forget($key);
+        } catch (\Throwable $exception) {
+            Log::warning('Cache forget failed for exam hot path', [
+                'key' => $key,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function questionMetadata(int $soalId): ?object
+    {
+        $qData = $this->rememberHotValue("bank_soal:{$soalId}:v2", 7200, function () use ($soalId) {
+            $row = DB::table('bank_soals')->find($soalId);
+
+            return $row ? [
+                'id' => (int) $row->id,
+                'tipe_soal' => $row->tipe_soal,
+                'bobot_nilai' => $row->bobot_nilai,
+            ] : null;
+        });
+
+        return $qData ? (object) $qData : null;
+    }
+
+    private function sessionQuestionIds(object $s): array
+    {
+        return array_map('intval', $this->rememberHotValue("session_soals:{$s->id}", 7200, function () use ($s) {
+            return DB::table('sesi_ujian_soals')
+                ->where('sesi_ujian_id', $s->id)
+                ->pluck('bank_soal_id')
+                ->all();
+        }));
+    }
+
+    private function optionIdsForQuestion(int $soalId): array
+    {
+        return array_map('intval', $this->rememberHotValue("opsi_soal:{$soalId}", 7200, function () use ($soalId) {
+            return DB::table('opsi_jawabans')
+                ->where('bank_soal_id', $soalId)
+                ->pluck('id')
+                ->all();
+        }));
+    }
+
+    private function bufferAnswer(object $s, object $q, array $payload): void
+    {
+        try {
+            Redis::hset("queue_jawaban:{$s->id}", (string) $q->id, json_encode($payload));
+            Redis::expire("queue_jawaban:{$s->id}", 86400);
+            PersistAnswerSnapshot::dispatch((int) $s->id, (int) $q->id)->onQueue('answers');
+        } catch (\Throwable $exception) {
+            Log::error('Redis answer buffer unavailable; persisting directly', [
+                'session_id' => $s->id,
+                'question_id' => $q->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            $this->persistPreparedAnswer(
+                (int) $s->id,
+                (int) $q->id,
+                $payload,
+                $q
+            );
+        }
+    }
+
+    private function correctOptionIdsForQuestions(array $questionIds): array
+    {
+        if (empty($questionIds)) {
+            return [];
+        }
+
+        return DB::table('opsi_jawabans')
+            ->whereIn('bank_soal_id', $questionIds)
+            ->where('is_benar', true)
+            ->pluck('id', 'bank_soal_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    private function answerScore(object $question, ?int $optionId, ?int $knownCorrectOptionId = null): array
+    {
+        $score = 0;
+        $status = 'pending_manual';
+
+        if ($question->tipe_soal === 'PG') {
+            if ($knownCorrectOptionId !== null) {
+                $ok = $optionId !== null && (int) $optionId === $knownCorrectOptionId;
+            } else {
+                $ok = $optionId !== null && DB::table('opsi_jawabans')
+                    ->where(['id' => $optionId, 'bank_soal_id' => $question->id, 'is_benar' => true])
+                    ->exists();
+            }
+
+            $score = $ok ? $question->bobot_nilai : 0;
+            $status = 'auto_scored';
+        }
+
+        return [$score, $status];
+    }
+
+    private function persistPreparedAnswer(int $sessionId, int $soalId, array $answer, object $question, ?int $knownCorrectOptionId = null): void
+    {
+        [$score, $status] = $this->answerScore(
+            $question,
+            isset($answer['opsi_jawaban_id']) ? (int) $answer['opsi_jawaban_id'] : null,
+            $knownCorrectOptionId
+        );
+
+        if ($this->persistAnswerIfNewer($sessionId, $soalId, $answer, $question, $score, $status)) {
+            $this->recordAnswerAuditSafely($sessionId, $soalId, $answer);
+        }
     }
 
     /**
@@ -316,19 +541,7 @@ class ExamService
             return;
         }
 
-        $score  = 0;
-        $status = 'pending_manual';
-        if ($q->tipe_soal === 'PG') {
-            $ok = DB::table('opsi_jawabans')
-                ->where(['id' => $a['opsi_jawaban_id'], 'bank_soal_id' => $q->id, 'is_benar' => true])
-                ->exists();
-            $score  = $ok ? $q->bobot_nilai : 0;
-            $status = 'auto_scored';
-        }
-
-        if ($this->persistAnswerIfNewer($sessionId, $soalId, $a, $q, $score, $status)) {
-            $this->auditAnswerSaved($sessionId, $soalId, $a);
-        }
+        $this->persistPreparedAnswer($sessionId, $soalId, $a, $q);
 
         $this->forgetIfCurrent("queue_jawaban:$sessionId", (string) $soalId, $raw);
     }
@@ -387,7 +600,7 @@ class ExamService
         DB::transaction(function () use ($rowsToPersist, $sessionId) {
             foreach ($rowsToPersist as [$soalId, $a, $q, $score, $status]) {
                 if ($this->persistAnswerIfNewer($sessionId, $soalId, $a, $q, $score, $status)) {
-                    $this->auditAnswerSaved($sessionId, $soalId, $a);
+                    $this->recordAnswerAuditSafely($sessionId, $soalId, $a);
                 }
             }
         });
@@ -479,6 +692,19 @@ class ExamService
         return true;
     }
 
+    private function recordAnswerAuditSafely(int $sessionId, int $soalId, array $answer): void
+    {
+        try {
+            $this->auditAnswerSaved($sessionId, $soalId, $answer);
+        } catch (\Throwable $exception) {
+            Log::warning('Answer audit log failed', [
+                'session_id' => $sessionId,
+                'question_id' => $soalId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
     private function auditAnswerSaved(int $sessionId, int $soalId, array $answer): void
     {
         DB::table('audit_logs')->insert([
@@ -516,7 +742,16 @@ class ExamService
                 return $session ?: $s;
             }
 
-            $this->flushAll($session->id);
+            try {
+                $this->flushAll($session->id);
+            } catch (\Throwable $exception) {
+                Log::error('Unable to flush pending answers before submit', [
+                    'session_id' => $session->id,
+                    'error' => $exception->getMessage(),
+                ]);
+
+                abort(503, 'Jawaban pending belum bisa diproses. Coba kirim ulang beberapa saat lagi.');
+            }
 
             $score = DB::table('jawaban_siswas')
                 ->where('sesi_ujian_id', $session->id)

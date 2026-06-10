@@ -174,7 +174,7 @@ const archiveSchedule = async () => {
         : 'Arsipkan jadwal ini? Riwayat sesi dan jawaban tetap disimpan.';
     if (!(await confirmAction({ title: 'Arsipkan jadwal?', text: warning, confirmButtonText: 'Ya, arsipkan', danger: true }))) return;
     try {
-        await axios.delete(`/kelola/data/jadwal-ujian/${selectedSchedule.value.id}`);
+        await axios.post(`/kelola/data/jadwal-ujian/${selectedSchedule.value.id}/archive`);
         filters.value.jadwal_id = '';
         clearPreview();
         await loadOptions();
@@ -200,3 +200,4 @@ onMounted(() => loadOptions().catch(error => notifyError(errorMessage(error))));
 .preview-card iframe { width: 100%; height: 720px; border: 0; display: block; }
 .empty-state { padding: 5rem 2rem; text-align: center; color: #94a3b8; }
 </style>
+

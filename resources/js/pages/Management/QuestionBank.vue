@@ -102,7 +102,7 @@
                     <div class="question-sidebar">
                         <button class="btn btn-primary w-100 mb-3" @click="newQuestion"><i class="fa-solid fa-plus me-1"></i> Tambah Soal</button>
                         <div v-for="question in activePackage.soal" :key="question.id" class="question-item" :class="{ active: questionForm.id === question.id }" @click="editQuestion(question)">
-                            <div class="d-flex justify-content-between"><strong>No. {{ question.urutan }} <span class="badge bg-secondary">{{ question.tipe_soal }}</span></strong><button class="btn btn-link text-danger p-0" @click.stop="deleteQuestion(question)"><i class="fa-solid fa-trash-can"></i></button></div>
+                            <div class="d-flex justify-content-between"><strong>No. {{ question.urutan }} <span class="badge bg-secondary">{{ question.tipe_soal }}</span> <span v-if="question.gambar_url" class="badge bg-info-subtle text-info-emphasis"><i class="fa-solid fa-image"></i></span></strong><button class="btn btn-link text-danger p-0" @click.stop="deleteQuestion(question)"><i class="fa-solid fa-trash-can"></i></button></div>
                             <div class="small text-muted text-truncate mt-1">{{ question.pertanyaan }}</div>
                         </div>
                         <div v-if="!activePackage.soal.length" class="text-center text-muted small py-4">Belum ada soal.</div>
@@ -117,7 +117,16 @@
                                 </div>
                             </div>
                             <div class="col-md-4"><label class="form-label fw-semibold">Bobot Nilai</label><input type="number" min="0" step="0.01" class="form-control" v-model="questionForm.bobot_nilai"></div>
-                            <div class="col-md-4"><label class="form-label fw-semibold">Gambar Opsional</label><input ref="imageInput" type="file" accept="image/*" class="form-control"></div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold">Gambar Opsional</label>
+                                <input ref="imageInput" type="file" accept="image/*" class="form-control" @change="onQuestionImageChange">
+                            </div>
+                        </div>
+                        <div v-if="questionImagePreview" class="question-image-preview mb-3">
+                            <div class="preview-label">{{ imagePreviewUrl ? 'Preview Gambar Baru' : 'Gambar Tersimpan' }}</div>
+                            <a :href="questionImagePreview" target="_blank" rel="noopener" class="preview-link">
+                                <img :src="questionImagePreview" alt="Preview gambar soal">
+                            </a>
                         </div>
                         <div class="mb-3"><label class="form-label fw-semibold">Pertanyaan</label><textarea class="form-control" rows="4" v-model="questionForm.pertanyaan"></textarea></div>
                         <div v-if="questionForm.tipe_soal === 'PG'" class="option-box">
@@ -146,7 +155,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import axios from 'axios';
 import Swal from 'sweetalert2';
 import AdminSidebar from '../../components/AdminSidebar.vue';
@@ -155,10 +164,27 @@ const packages = ref([]); const mapels = ref([]); const search = ref(''); const 
 const showPackageModal = ref(false); const showWizardModal = ref(false); const showImportModal = ref(false);
 const packageForm = ref({ id: null, mata_pelajaran_id: '', kode_paket: '', jumlah_pg: 0, has_isian: false });
 const activePackage = ref({ id: null, judul: '', nama_mapel: '', status: 'draft', soal: [] });
-const questionForm = ref(emptyQuestion()); const imageInput = ref(null); const importInput = ref(null);
+const questionForm = ref(emptyQuestion()); const imageInput = ref(null); const importInput = ref(null); const imagePreviewUrl = ref('');
 const filteredPackages = computed(() => packages.value.filter(item => (!statusFilter.value || item.status === statusFilter.value) && (!search.value || `${item.judul} ${item.nama_mapel}`.toLowerCase().includes(search.value.toLowerCase()))));
-const message = error => Object.values(error.response?.data?.errors || {}).flat()[0] || error.response?.data?.message || 'Permintaan gagal diproses.';
-function emptyQuestion() { return { id: null, tipe_soal: 'PG', pertanyaan: '', bobot_nilai: 1, kunci: 'A', opsi: ['A','B','C','D','E'].map(kode => ({ kode, teks_opsi: '' })) }; }
+const questionImagePreview = computed(() => imagePreviewUrl.value || questionForm.value.gambar_url || '');
+const message = error => {
+    const data = error.response?.data;
+    if (data?.errors) return Object.values(data.errors).flat()[0];
+    if (data?.message) return data.message;
+    if (typeof data === 'string') {
+        const text = data
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const known = text.match(/Paket tidak dapat direvisi[^.]*\./i)?.[0];
+        if (known) return known;
+    }
+    if (error.response?.status === 422) return 'Data belum valid atau paket soal tidak dapat direvisi.';
+    return 'Permintaan gagal diproses.';
+};
+function emptyQuestion() { return { id: null, tipe_soal: 'PG', pertanyaan: '', gambar_url: '', bobot_nilai: 1, kunci: 'A', opsi: ['A','B','C','D','E'].map(kode => ({ kode, teks_opsi: '' })) }; }
 const loadData = async () => { const { data } = await axios.get('/kelola/data/paket-soal'); packages.value = data.data.packages; mapels.value = data.data.mapels; };
 const openPackage = item => {
     packageForm.value = item ? {
@@ -218,7 +244,17 @@ const deletePackage = async item => { if (!(await Swal.fire({ title: 'Hapus pake
 const refreshPackage = async id => { const { data } = await axios.get(`/kelola/data/paket-soal/${id}`); activePackage.value = data.data.package; };
 const openWizard = async item => { try { await refreshPackage(item.id); newQuestion(); showWizardModal.value = true; } catch (error) { Swal.fire('Gagal', message(error), 'error'); } };
 const closeWizard = async () => { showWizardModal.value = false; await loadData(); };
+const clearImagePreview = () => {
+    if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value);
+    imagePreviewUrl.value = '';
+};
+const onQuestionImageChange = event => {
+    clearImagePreview();
+    const file = event.target.files?.[0];
+    if (file) imagePreviewUrl.value = URL.createObjectURL(file);
+};
 const newQuestion = () => {
+    clearImagePreview();
     questionForm.value = emptyQuestion();
     if (activePackage.value) {
         const nextUrutan = activePackage.value.soal.length + 1;
@@ -228,10 +264,12 @@ const newQuestion = () => {
     if (imageInput.value) imageInput.value.value = '';
 };
 const editQuestion = item => {
+    clearImagePreview();
     questionForm.value = {
         id: item.id,
         tipe_soal: item.tipe_soal,
         pertanyaan: item.pertanyaan,
+        gambar_url: item.gambar_url || '',
         bobot_nilai: item.bobot_nilai,
         kunci: item.opsi.find(option => option.is_benar)?.kode || 'A',
         opsi: ['A','B','C','D','E'].map(kode => ({ kode, teks_opsi: item.opsi.find(option => option.kode === kode)?.teks_opsi || '' }))
@@ -255,8 +293,9 @@ const logout = async () => {
     if (result.isConfirmed) window.location.href = '/logout';
 };
 onMounted(() => loadData().catch(error => Swal.fire('Gagal', message(error), 'error')));
+onBeforeUnmount(clearImagePreview);
 </script>
 
 <style scoped>
-#wrapper { display:flex;width:100vw;min-height:100vh }.main-content{flex-grow:1;min-width:0;height:100vh;overflow-y:auto}.top-navbar{background:#fff;height:70px;padding:0 2rem;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 10px rgba(0,0,0,.02);position:sticky;top:0;z-index:1020}.stat-card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.04);padding:1.25rem;display:flex;align-items:center}.stat-icon{width:50px;height:50px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.4rem;margin-right:1rem}.icon-blue{background:#eff6ff;color:#3b82f6}.icon-green{background:#f0fdf4;color:#22c55e}.icon-purple{background:#faf5ff;color:#a855f7}.stat-label{font-size:.75rem;color:#64748b;text-transform:uppercase;font-weight:600}.stat-value{font-size:1.5rem;font-weight:700}.table-card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.04);overflow:hidden}.table-card-header{padding:1.25rem 1.5rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #f1f5f9;flex-wrap:wrap;gap:1rem}.table-custom th{background:#f8fafc;color:#475569;padding:.85rem 1rem;font-size:.8rem;text-transform:uppercase}.table-custom td{padding:.85rem 1rem;vertical-align:middle;font-size:.9rem}.modal-backdrop-custom{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1050;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}.import-layer{z-index:1060}.modal-custom{background:#fff;border-radius:16px;width:95%;max-width:580px;box-shadow:0 25px 60px rgba(0,0,0,.15);display:flex;flex-direction:column}.modal-fullscreen-custom{max-width:95vw;height:95vh;overflow:hidden}.modal-header-custom,.modal-footer-custom{padding:1rem 1.5rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #f1f5f9}.modal-footer-custom{justify-content:flex-end;gap:.75rem;border-top:1px solid #f1f5f9;border-bottom:0}.modal-body-custom{padding:1.5rem}.wizard-body{height:calc(95vh - 70px)}.question-sidebar{width:320px;background:#f8fafc;border-right:1px solid #e2e8f0;padding:1rem;overflow-y:auto}.question-editor{flex-grow:1;padding:1.5rem;overflow-y:auto}.question-item{padding:.75rem;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:.5rem;cursor:pointer}.question-item.active{border-color:#3b82f6;background:#eff6ff}.option-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:1rem}
+#wrapper { display:flex;width:100vw;min-height:100vh }.main-content{flex-grow:1;min-width:0;height:100vh;overflow-y:auto}.top-navbar{background:#fff;height:70px;padding:0 2rem;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 10px rgba(0,0,0,.02);position:sticky;top:0;z-index:1020}.stat-card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.04);padding:1.25rem;display:flex;align-items:center}.stat-icon{width:50px;height:50px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.4rem;margin-right:1rem}.icon-blue{background:#eff6ff;color:#3b82f6}.icon-green{background:#f0fdf4;color:#22c55e}.icon-purple{background:#faf5ff;color:#a855f7}.stat-label{font-size:.75rem;color:#64748b;text-transform:uppercase;font-weight:600}.stat-value{font-size:1.5rem;font-weight:700}.table-card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.04);overflow:hidden}.table-card-header{padding:1.25rem 1.5rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #f1f5f9;flex-wrap:wrap;gap:1rem}.table-custom th{background:#f8fafc;color:#475569;padding:.85rem 1rem;font-size:.8rem;text-transform:uppercase}.table-custom td{padding:.85rem 1rem;vertical-align:middle;font-size:.9rem}.modal-backdrop-custom{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1050;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}.import-layer{z-index:1060}.modal-custom{background:#fff;border-radius:16px;width:95%;max-width:580px;box-shadow:0 25px 60px rgba(0,0,0,.15);display:flex;flex-direction:column}.modal-fullscreen-custom{max-width:95vw;height:95vh;overflow:hidden}.modal-header-custom,.modal-footer-custom{padding:1rem 1.5rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #f1f5f9}.modal-footer-custom{justify-content:flex-end;gap:.75rem;border-top:1px solid #f1f5f9;border-bottom:0}.modal-body-custom{padding:1.5rem}.wizard-body{height:calc(95vh - 70px)}.question-sidebar{width:320px;background:#f8fafc;border-right:1px solid #e2e8f0;padding:1rem;overflow-y:auto}.question-editor{flex-grow:1;padding:1.5rem;overflow-y:auto}.question-item{padding:.75rem;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:.5rem;cursor:pointer}.question-item.active{border-color:#3b82f6;background:#eff6ff}.option-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:1rem}.question-image-preview{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:.85rem}.preview-label{font-size:.75rem;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:.5rem}.preview-link{display:inline-flex;max-width:100%}.preview-link img{display:block;max-width:100%;max-height:260px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;object-fit:contain}
 </style>

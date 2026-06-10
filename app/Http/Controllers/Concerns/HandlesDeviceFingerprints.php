@@ -89,21 +89,37 @@ trait HandlesDeviceFingerprints
 
     protected function deviceLockEnabled(): bool
     {
-        return Cache::remember('setting:device_lock_enabled', 30, function () {
-            if (! Schema::hasTable('app_settings')) {
-                return filter_var(env('DEVICE_LOCK_ENABLED', true), FILTER_VALIDATE_BOOLEAN);
-            }
+        try {
+            return Cache::remember('setting:device_lock_enabled', 30, fn () => $this->readDeviceLockEnabled());
+        } catch (\Throwable $exception) {
+            return $this->readDeviceLockEnabled();
+        }
+    }
 
-            $value = DB::table('app_settings')
-                ->where('key', 'device_lock_enabled')
-                ->value('value');
+    protected function readDeviceLockEnabled(): bool
+    {
+        if (! $this->runtimeTableExists('app_settings')) {
+            return filter_var(env('DEVICE_LOCK_ENABLED', true), FILTER_VALIDATE_BOOLEAN);
+        }
 
-            if ($value === null) {
-                return filter_var(env('DEVICE_LOCK_ENABLED', true), FILTER_VALIDATE_BOOLEAN);
-            }
+        $value = DB::table('app_settings')
+            ->where('key', 'device_lock_enabled')
+            ->value('value');
 
-            return filter_var($value, FILTER_VALIDATE_BOOLEAN);
-        });
+        if ($value === null) {
+            return filter_var(env('DEVICE_LOCK_ENABLED', true), FILTER_VALIDATE_BOOLEAN);
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+    }
+
+    protected function runtimeTableExists(string $table): bool
+    {
+        try {
+            return Cache::remember("schema:has-table:$table", 600, fn () => Schema::hasTable($table));
+        } catch (\Throwable $exception) {
+            return Schema::hasTable($table);
+        }
     }
 
     protected function setDeviceLockEnabled(bool $enabled, ?int $actorId = null): bool
@@ -136,7 +152,7 @@ trait HandlesDeviceFingerprints
 
     protected function recordDeviceFingerprintHistory(User $user, Request $request, string $fingerprint, ?object $session = null, string $action = 'checked'): void
     {
-        if (! Schema::hasTable('device_fingerprint_histories')) {
+        if (! $this->runtimeTableExists('device_fingerprint_histories')) {
             return;
         }
 
@@ -151,7 +167,11 @@ trait HandlesDeviceFingerprints
             $lockEnabled ? '1' : '0',
         ]));
 
-        if (! Cache::add("device-history:$dedup", 1, now()->addSeconds(60))) {
+        try {
+            if (! Cache::add("device-history:$dedup", 1, now()->addSeconds(60))) {
+                return;
+            }
+        } catch (\Throwable $exception) {
             return;
         }
 
@@ -347,7 +367,14 @@ trait HandlesDeviceFingerprints
             return;
         }
 
-        $freshUser = User::query()->find($user->id);
+        $freshUserKey = "device-fingerprint:fresh-user:{$user->id}";
+        if (app()->bound($freshUserKey)) {
+            $freshUser = app($freshUserKey);
+        } else {
+            $freshUser = User::query()->find($user->id);
+            app()->instance($freshUserKey, $freshUser);
+        }
+
         if (! $freshUser) {
             abort(401);
         }

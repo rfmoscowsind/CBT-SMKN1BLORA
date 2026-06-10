@@ -2,6 +2,104 @@
 
 ---
 
+## 2026-06-09 - Preview dan Proxy Gambar Soal
+
+| File | Perubahan | Kategori |
+|------|-----------|----------|
+| `resources/js/pages/Management/QuestionBank.vue` | Tambah preview gambar saat memilih file baru dan saat membuka ulang soal yang sudah punya gambar | UI Bank Soal |
+| `app/Services/ImageService.php` | URL gambar soal baru dikembalikan sebagai `/media/soal-images/{file}` agar aman di halaman HTTPS | Media |
+| `routes/web.php` | Tambah route proxy `/media/soal-images/{file}` untuk membaca gambar dari disk S3/MinIO atau public local | Media |
+| `QuestionBankManagementController.php` / `WebController.php` / `ApiController.php` | `gambar_url` lama dari MinIO dinormalisasi ke route same-origin sebelum dikirim ke admin dan siswa | Kompatibilitas |
+
+Catatan:
+
+- Gambar soal yang sudah ada dengan URL `http://media.../cbt-media/soal-images/...` tetap bisa tampil karena dikonversi saat response.
+- Ujian siswa sudah memakai `gambar_url` dari payload soal; route proxy membuat gambar tampil lewat domain CBT yang sama.
+
+---
+
+## 2026-06-09 - Perbaikan Upload Gambar Soal
+
+| File | Perubahan | Kategori |
+|------|-----------|----------|
+| `app/Services/ImageService.php` | Error gambar kini memakai validation response JSON, menerima format mobile umum, dan memberi pesan jelas saat gagal konversi atau gagal upload ke MinIO | Media storage |
+| `app/Http/Controllers/QuestionBankManagementController.php` | Validasi gambar soal diperluas ke JPG/PNG/GIF/WebP/BMP/AVIF sampai 5 MB; blokir paket yang sudah punya sesi siswa kini dikirim sebagai JSON 422 yang terbaca frontend | Bank Soal |
+| `resources/js/pages/Management/QuestionBank.vue` | Handler error membaca pesan JSON/HTML agar tidak hanya tampil `Permintaan gagal diproses` | UI |
+
+Catatan:
+
+- Jalur upload Laravel ke MinIO sudah diuji ulang dari server produksi dan public GET gambar WebP mengembalikan `200 OK`.
+- Jika paket soal sudah digunakan sampai ada sesi ujian siswa, upload/edit soal tetap diblokir, tetapi pesan sekarang menjelaskan penyebabnya.
+
+---
+
+## 2026-06-09 - Monitoring DB Utama Direct Primary
+
+| File | Perubahan | Kategori |
+|------|-----------|----------|
+| `config/database.php` | Tambah koneksi `pgsql_primary_direct` ke PostgreSQL asli `192.168.16.121:5432` | Monitoring |
+| `routes/web.php` | Kartu `DB Utama` di `/monitoring/stats` memakai `pgsql_primary_direct`, bukan koneksi default PgBouncer | Monitoring |
+| `.env` / `.env.example` / `.env.production.example` | Tambah `DB_PRIMARY_*` untuk monitoring direct primary | Config |
+
+Catatan:
+
+- Traffic aplikasi tetap lewat PgBouncer `127.0.0.1:6432`.
+- Kartu PgBouncer tetap memantau pooler.
+- Kartu DB Utama sekarang memantau PostgreSQL asli di `192.168.16.121:5432`.
+
+---
+
+## 2026-06-09 - Pembatalan Redis Backup Monitoring
+
+| File | Perubahan | Kategori |
+|------|-----------|----------|
+| `.env` | Hapus `REDIS_BACKUP_HOST`, `REDIS_BACKUP_PORT`, `REDIS_BACKUP_PASSWORD`, `REDIS_BACKUP_DB` | Config |
+| `.env.example` / `.env.production.example` | Hapus contoh konfigurasi Redis Backup | Config |
+| `routes/web.php` | `/monitoring/stats` tidak lagi query Redis Backup; diganti metrik PgBouncer via `SHOW POOLS` / `SHOW STATS` | Monitoring |
+| `SuperAdminDashboard.vue` | Kartu `Redis Backup` diganti menjadi kartu `PgBouncer` | UI |
+
+Catatan:
+
+- Redis Backup tidak dipakai.
+- Redis utama untuk session/cache/queue tetap lokal di `127.0.0.1:6379`.
+- Dashboard SuperAdmin sekarang menampilkan PgBouncer: pool mode, client aktif/tunggu, server aktif/idle, avg query/wait, total query, dan total transaksi.
+
+---
+
+## 2026-06-08 - Implementasi Awal MinIO untuk Gambar Soal
+
+| File | Perubahan | Kategori |
+|------|-----------|----------|
+| `composer.json` / `composer.lock` | Tambah `league/flysystem-aws-s3-v3` untuk disk S3/MinIO | Dependency |
+| `ImageService.php` | Upload WebP ke `Storage::disk('s3')` saat `FILESYSTEM_DISK=s3`; fallback lokal tetap tersedia | Media storage |
+| `.env` / `.env.example` / `.env.production.example` | Tambah konfigurasi endpoint MinIO `http://192.168.16.130:9000`, bucket `cbt-media`, path-style endpoint | Config |
+| `implantminiio.md` | Ubah dari rencana menjadi catatan implementasi dan checklist aktivasi | Dokumentasi |
+
+Catatan:
+
+- MinIO health check berhasil (`/minio/health/live` = 200).
+- Production sudah dipindah ke `FILESYSTEM_DISK=s3` memakai bucket `cbt-media`.
+- URL publik Laravel diarahkan ke `http://media.madnnet.my.id:9000/cbt-media/soal-images/{file}`.
+- Smoke test upload dari Laravel berhasil dan public GET mengembalikan `200 image/webp`.
+
+---
+
+## 2026-06-08 - Hardening Payload Soal Ujian
+
+| File | Perubahan | Kategori |
+|------|-----------|----------|
+| `WebController.php` | Metadata awal `/ujian/sesi/{id}` tidak lagi membawa `current` soal pertama | Anti-leak / performa |
+| `WebController.php` | Payload opsi web tidak lagi mengirim `id` numerik internal, hanya `hash_id` / `hashid` | Hardening |
+| `ExamInterface.vue` | Request `/ujian/sesi/{id}` dan `/soal?nomor=` tidak lagi mengirim `device_raw` panjang di query string | Privacy / logging |
+
+Catatan:
+
+- Soal tetap dikirim satu nomor per request melalui `/ujian/sesi/{id}/soal?nomor=N`.
+- Kunci jawaban `is_benar` tidak dikirim ke frontend ujian.
+- Hash ID adalah obfuscation, bukan enkripsi. Transport tetap diamankan oleh HTTPS, tetapi isi response memang dapat dilihat siswa di DevTools setelah browser menerimanya.
+
+---
+
 ## 2026-06-08 - GPT08061 Resume Session dan Device Lock Toggle
 
 | File | Perubahan | Kategori |

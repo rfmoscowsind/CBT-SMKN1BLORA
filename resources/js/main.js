@@ -50,27 +50,74 @@ const showFatalError = (error) => {
     `;
 };
 
-app.config.errorHandler = showFatalError;
+const retryableErrorPattern = /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk|dynamically imported module|NetworkError|Load failed|fetch failed/i;
 
-router.onError((error) => {
-    const message = String(error?.message || error);
-    const chunkFailed = /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk|dynamically imported module/i.test(message);
+const isRetryableError = (error) => retryableErrorPattern.test(String(error?.message || error));
 
-    if (chunkFailed && !sessionStorage.getItem('cbt_chunk_reload_once')) {
-        sessionStorage.setItem('cbt_chunk_reload_once', '1');
-        const url = new URL(window.location.href);
-        url.searchParams.set('asset_refresh', Date.now().toString());
-        window.location.replace(url.toString());
+const showRetryOverlay = (error, seconds) => {
+    console.error(error);
+
+    let overlay = document.getElementById('cbt-fatal-error');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'cbt-fatal-error';
+        document.body.appendChild(overlay);
+    }
+
+    overlay.innerHTML = `
+        <div style="position:fixed;inset:0;z-index:99999;display:grid;place-items:center;background:rgba(248,250,252,.96);font-family:Arial,sans-serif;padding:24px;">
+            <div style="max-width:560px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;box-shadow:0 12px 30px rgba(15,23,42,.16);">
+                <h2 style="margin:0 0 10px;color:#1d4ed8;font-size:20px;">Mencoba memuat ulang</h2>
+                <p style="margin:0 0 16px;color:#475569;line-height:1.5;">Koneksi atau aset halaman sempat gagal. Aplikasi akan mencoba ulang dalam <strong id="cbt-retry-countdown">${seconds}</strong> detik.</p>
+                <pre style="white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;color:#334155;font-size:12px;max-height:220px;overflow:auto;">${escapeHtml(error?.message || error)}</pre>
+            </div>
+        </div>
+    `;
+};
+
+const retryWithCountdown = (error) => {
+    if (!isRetryableError(error)) {
+        showFatalError(error);
         return;
     }
 
-    showFatalError(error);
+    const key = 'cbt_auto_retry_count';
+    const attempts = Number(sessionStorage.getItem(key) || '0');
+    if (attempts >= 3) {
+        showFatalError(error);
+        return;
+    }
+
+    sessionStorage.setItem(key, String(attempts + 1));
+    let seconds = Math.min(3 * (attempts + 1), 9);
+    showRetryOverlay(error, seconds);
+
+    const timer = setInterval(() => {
+        seconds -= 1;
+        const countdown = document.getElementById('cbt-retry-countdown');
+        if (countdown) {
+            countdown.textContent = String(Math.max(seconds, 0));
+        }
+
+        if (seconds <= 0) {
+            clearInterval(timer);
+            const url = new URL(window.location.href);
+            url.searchParams.set('asset_refresh', Date.now().toString());
+            window.location.replace(url.toString());
+        }
+    }, 1000);
+};
+
+app.config.errorHandler = retryWithCountdown;
+
+router.onError((error) => {
+    retryWithCountdown(error);
 });
 
 app.use(createPinia());
 app.use(router);
 
 router.isReady().then(() => {
-    sessionStorage.removeItem('cbt_chunk_reload_once');
+    sessionStorage.removeItem('cbt_auto_retry_count');
     app.mount('#app');
 });

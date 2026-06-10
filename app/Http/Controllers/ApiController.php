@@ -6,12 +6,15 @@ use App\Http\Controllers\Concerns\HandlesDeviceFingerprints;
 use App\Models\User;
 use App\Services\ExamService;
 use App\Services\IdCodec;
+use App\Services\ImageService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
@@ -114,8 +117,14 @@ class ApiController extends Controller
     public function sync(Request $request, string $sid): JsonResponse
     {
         $session = $this->ownedApiSession($request, $sid);
-        $synced = 0;
+        $answers = [];
+        $flagUpdates = [];
+
         foreach ($request->input('answers', []) as $answer) {
+            if (! is_array($answer)) {
+                continue;
+            }
+
             $questionHash = $answer['soal_hash'] ?? null;
             if (! $questionHash) {
                 continue;
@@ -123,14 +132,22 @@ class ApiController extends Controller
             $questionId = $this->ids->decode((string) $questionHash);
             $optionHash = $answer['opsi_hash'] ?? null;
             $optionId = $optionHash ? $this->ids->decode((string) $optionHash) : null;
-            $this->exams->save($session, $questionId, $optionId, $answer['essay'] ?? null, $answer['client_updated_at'] ?? null);
+
+            $answers[] = [
+                'bank_soal_id' => $questionId,
+                'opsi_jawaban_id' => $optionId,
+                'jawaban_essay' => $answer['essay'] ?? null,
+                'client_updated_at' => $answer['client_updated_at'] ?? null,
+            ];
+
             if (array_key_exists('ragu', $answer)) {
-                DB::table('sesi_ujian_soals')
-                    ->where(['sesi_ujian_id' => $session->id, 'bank_soal_id' => $questionId])
-                    ->update(['ditandai' => (bool) $answer['ragu']]);
+                $flagUpdates[$questionId] = (bool) $answer['ragu'];
             }
-            $synced++;
         }
+
+        $result = $this->exams->saveMany($session, $answers);
+        $this->updateQuestionFlags((int) $session->id, $flagUpdates);
+        $synced = (int) ($result['saved'] ?? count($answers));
 
         return $this->ok(['synced' => $synced, 'sisa_detik' => $this->exams->remaining($session)]);
     }
@@ -138,10 +155,20 @@ class ApiController extends Controller
     public function ping(Request $request, string $sid): JsonResponse
     {
         $session = $this->ownedApiSession($request, $sid);
-        Redis::setex("cbt:session:online:{$session->id}", 45, now()->timestamp);
-        if (! Redis::exists("cbt:ping:db:{$session->id}")) {
+
+        try {
+            Redis::setex("cbt:session:online:{$session->id}", 45, now()->timestamp);
+            if (! Redis::exists("cbt:ping:db:{$session->id}")) {
+                DB::table('sesi_ujians')->where('id', $session->id)->update(['last_seen_at' => now(), 'updated_at' => now()]);
+                Redis::setex("cbt:ping:db:{$session->id}", 60, 1);
+            }
+        } catch (\Throwable $exception) {
+            Log::warning('Redis heartbeat unavailable; falling back to DB heartbeat', [
+                'session_id' => $session->id,
+                'error' => $exception->getMessage(),
+            ]);
+
             DB::table('sesi_ujians')->where('id', $session->id)->update(['last_seen_at' => now(), 'updated_at' => now()]);
-            Redis::setex("cbt:ping:db:{$session->id}", 60, 1);
         }
 
         return $this->ok(['sisa_detik' => $this->exams->remaining($session)]);
@@ -182,9 +209,9 @@ class ApiController extends Controller
 
     private function singleQuestionPayload(object $session, int $number): array
     {
-        $item = DB::table('sesi_ujian_soals')->where(['sesi_ujian_id' => $session->id, 'nomor_soal' => $number])->first();
+        $item = $this->sessionItems((int) $session->id)->firstWhere('nomor_soal', $number);
         abort_unless($item, 404);
-        $question = DB::table('bank_soals')->where('id', $item->bank_soal_id)->first();
+        $question = $this->questionRow((int) $item->bank_soal_id);
         abort_unless($question, 404);
         $answer = DB::table('jawaban_siswas')->where(['sesi_ujian_id' => $session->id, 'bank_soal_id' => $question->id])->first();
         $pending = $this->pendingAnswer((int) $session->id, (int) $question->id);
@@ -197,7 +224,7 @@ class ApiController extends Controller
             'hash_id' => $this->ids->encode((int) $question->id),
             'tipe' => $question->tipe_soal,
             'pertanyaan' => $question->pertanyaan,
-            'gambar_url' => $question->gambar_url,
+            'gambar_url' => ImageService::displayUrl($question->gambar_url),
             'opsi' => $this->questionOptions($question, $item),
             'jawaban_siswa' => $pendingOptionId
                 ? $this->ids->encode((int) $pendingOptionId)
@@ -208,7 +235,18 @@ class ApiController extends Controller
 
     private function pendingAnswer(int $sessionId, int $questionId): ?array
     {
-        $raw = Redis::hget("queue_jawaban:$sessionId", (string) $questionId);
+        try {
+            $raw = Redis::hget("queue_jawaban:$sessionId", (string) $questionId);
+        } catch (\Throwable $exception) {
+            Log::warning('Unable to read pending answer from Redis', [
+                'session_id' => $sessionId,
+                'question_id' => $questionId,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+
         if (! $raw) {
             return null;
         }
@@ -224,10 +262,15 @@ class ApiController extends Controller
             return [];
         }
         $order = json_decode($item->opsi_order ?: '[]', true);
-        $query = DB::table('opsi_jawabans')->where('bank_soal_id', $question->id);
-        $options = ! empty($order)
-            ? $query->whereIn('id', $order)->get()->sortBy(fn ($option) => array_search($option->id, $order, true))->values()
-            : $query->orderBy('kode')->get();
+        $position = array_flip(array_map('intval', is_array($order) ? $order : []));
+        $options = $this->questionOptionRows((int) $question->id);
+
+        $options = ! empty($position)
+            ? $options
+                ->whereIn('id', array_keys($position))
+                ->sortBy(fn ($option) => $position[(int) $option->id] ?? PHP_INT_MAX)
+                ->values()
+            : $options->sortBy('kode')->values();
 
         return $options->map(fn ($option) => [
             'hashid' => $this->ids->encode((int) $option->id),
@@ -237,7 +280,99 @@ class ApiController extends Controller
         ])->values()->all();
     }
 
+    private function rememberControllerValue(string $key, int $seconds, callable $resolver): mixed
+    {
+        try {
+            return Cache::remember($key, $seconds, $resolver);
+        } catch (\Throwable $exception) {
+            Log::warning('Cache unavailable for api controller hot path', [
+                'key' => $key,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return $resolver();
+        }
+    }
+
+    private function questionRow(int $questionId): ?object
+    {
+        $row = $this->rememberControllerValue("bank_soal:{$questionId}:render:v1", 7200, function () use ($questionId) {
+            $question = DB::table('bank_soals')->where('id', $questionId)->first();
+
+            return $question ? (array) $question : null;
+        });
+
+        return $row ? (object) $row : null;
+    }
+
+    private function questionOptionRows(int $questionId)
+    {
+        $rows = $this->rememberControllerValue("opsi_soal:{$questionId}:render:v1", 7200, function () use ($questionId) {
+            return DB::table('opsi_jawabans')
+                ->where('bank_soal_id', $questionId)
+                ->orderBy('kode')
+                ->get()
+                ->map(fn ($row) => (array) $row)
+                ->all();
+        });
+
+        return collect($rows)->map(fn ($row) => (object) $row);
+    }
+
+    private function sessionItems(int $sessionId)
+    {
+        $key = "exam.session-items.$sessionId";
+        if (app()->bound($key)) {
+            return app($key);
+        }
+
+        $items = DB::table('sesi_ujian_soals')->where('sesi_ujian_id', $sessionId)->orderBy('nomor_soal')->get();
+        app()->instance($key, $items);
+
+        return $items;
+    }
+
+    private function updateQuestionFlags(int $sessionId, array $flags): void
+    {
+        if (empty($flags)) {
+            return;
+        }
+
+        $flags = array_combine(
+            array_map('intval', array_keys($flags)),
+            array_map('boolval', array_values($flags))
+        );
+
+        $case = '';
+        $bindings = [];
+        foreach ($flags as $questionId => $flag) {
+            $case .= $flag ? ' WHEN ? THEN true' : ' WHEN ? THEN false';
+            $bindings[] = $questionId;
+        }
+
+        $ids = array_keys($flags);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+        DB::update(
+            "UPDATE sesi_ujian_soals
+             SET ditandai = CASE bank_soal_id{$case} ELSE ditandai END
+             WHERE sesi_ujian_id = ? AND bank_soal_id IN ($placeholders)",
+            [...$bindings, $sessionId, ...$ids]
+        );
+    }
+
     private function studentSchedules(User $user): array
+    {
+        $date = now('Asia/Jakarta')->toDateString();
+
+        return $this->rememberControllerValue(
+            "api-student-schedules:{$user->id}:{$date}:v1",
+            60,
+            fn () => $this->buildStudentSchedules($user)
+        );
+    }
+
+    private function buildStudentSchedules(User $user): array
     {
         $rows = DB::table('jadwal_ujians as j')
             ->join('master_ujians as m', 'm.id', '=', 'j.master_ujian_id')

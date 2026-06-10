@@ -32,6 +32,21 @@ return [
 
     'connections' => [
 
+        'pgsql_primary_direct' => [
+            'driver' => 'pgsql',
+            'url' => env('DB_PRIMARY_URL'),
+            'host' => env('DB_PRIMARY_HOST', '192.168.16.121'),
+            'port' => env('DB_PRIMARY_PORT', '5432'),
+            'database' => env('DB_PRIMARY_DATABASE', env('DB_DATABASE', 'cbt_system')),
+            'username' => env('DB_PRIMARY_USERNAME', env('DB_USERNAME', 'laravel')),
+            'password' => env('DB_PRIMARY_PASSWORD', env('DB_PASSWORD')),
+            'charset' => 'utf8',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public',
+            'sslmode' => env('DB_PRIMARY_SSLMODE', 'prefer'),
+        ],
+
         'pgsql_standby' => [
             'driver' => 'pgsql',
             'url' => env('DB_STANDBY_URL'),

@@ -63,6 +63,7 @@ class QuestionBankManagementController extends Controller
 
         $package->soal = $questions->map(function ($question) use ($options) {
             $question->opsi = $options->get($question->id, collect());
+            $question->gambar_url = ImageService::displayUrl($question->gambar_url);
             return $question;
         });
 
@@ -313,7 +314,12 @@ class QuestionBankManagementController extends Controller
             'tipe_soal' => ['required', 'in:PG,ISIAN'],
             'pertanyaan' => ['required', 'string'],
             'bobot_nilai' => ['required', 'numeric', 'min:0'],
-            'gambar' => ['nullable', 'image', 'max:2048'],
+            'gambar' => [
+                'nullable',
+                'file',
+                'max:5120',
+                'mimetypes:image/jpeg,image/png,image/gif,image/webp,image/bmp,image/x-ms-bmp,image/avif',
+            ],
             'opsi' => ['nullable', 'array'],
             'opsi.*.kode' => ['required_with:opsi', 'in:A,B,C,D,E'],
             'opsi.*.teks_opsi' => ['required_with:opsi', 'string'],
@@ -321,8 +327,13 @@ class QuestionBankManagementController extends Controller
         ]);
         $options = $data['opsi'] ?? [];
         if ($data['tipe_soal'] === 'PG') {
-            abort_if(count($options) < 2, 422, 'Soal PG minimal memiliki dua opsi.');
-            abort_unless(collect($options)->where('is_benar', true)->count() === 1, 422, 'Pilih tepat satu kunci jawaban.');
+            if (count($options) < 2) {
+                $this->fail('Soal PG minimal memiliki dua opsi.');
+            }
+
+            if (collect($options)->where('is_benar', true)->count() !== 1) {
+                $this->fail('Pilih tepat satu kunci jawaban.');
+            }
         }
 
         return $data;
@@ -378,15 +389,15 @@ class QuestionBankManagementController extends Controller
 
     private function ensureEditable(int $id): void
     {
-        abort_if(
-            DB::table('master_ujians as m')
+        $hasStudentSession = DB::table('master_ujians as m')
                 ->join('jadwal_ujians as j', 'j.master_ujian_id', '=', 'm.id')
                 ->join('sesi_ujians as s', 's.jadwal_ujian_id', '=', 'j.id')
                 ->where('m.paket_soal_id', $id)
-                ->exists(),
-            422,
-            'Paket tidak dapat direvisi karena sudah memiliki sesi ujian siswa.'
-        );
+                ->exists();
+
+        if ($hasStudentSession) {
+            $this->fail('Paket tidak dapat direvisi karena sudah memiliki sesi ujian siswa.');
+        }
     }
 
     private function markDraft(int $id): void
@@ -416,6 +427,14 @@ class QuestionBankManagementController extends Controller
         }
 
         return $validator->validated();
+    }
+
+    private function fail(string $message, int $status = 422): never
+    {
+        throw new HttpResponseException(response()->json([
+            'success' => false,
+            'message' => $message,
+        ], $status));
     }
 
     private function ok(mixed $data = null, int $status = 200): JsonResponse

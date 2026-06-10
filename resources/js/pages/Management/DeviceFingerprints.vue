@@ -165,6 +165,24 @@
 
             <!-- Main Table Section -->
             <div class="card border-0 shadow-sm">
+                <div class="d-flex justify-content-between align-items-center px-3 pt-3 pb-2 flex-wrap gap-2">
+                    <div class="text-muted small">
+                        <span v-if="totalFiltered > 0">
+                            Menampilkan <strong>{{ (currentPage - 1) * perPage + 1 }}</strong>???<strong>{{ Math.min(currentPage * perPage, totalFiltered) }}</strong>
+                            dari <strong>{{ totalFiltered }}</strong> data
+                        </span>
+                        <span v-else>Tidak ada data</span>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="text-muted small mb-0">Per halaman:</label>
+                        <select class="form-select form-select-sm" style="width: 80px;" v-model.number="perPage" @change="currentPage = 1">
+                            <option :value="10">10</option>
+                            <option :value="25">25</option>
+                            <option :value="50">50</option>
+                            <option :value="100">100</option>
+                        </select>
+                    </div>
+                </div>
                 <div class="card-body p-0">
                     <div v-if="filteredSessions.length === 0" class="text-center py-5">
                         <i class="fa-solid fa-fingerprint text-muted fs-1 mb-3"></i>
@@ -187,8 +205,8 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="(s, index) in filteredSessions" :key="s.id">
-                                    <td>{{ index + 1 }}</td>
+                                <tr v-for="(s, index) in paginatedSessions" :key="s.id">
+                                    <td>{{ (currentPage - 1) * perPage + index + 1 }}</td>
                                     <td>
                                         <div class="fw-bold text-dark">{{ s.name }}</div>
                                         <div class="text-secondary small">{{ s.username }}</div>
@@ -306,6 +324,30 @@
                             </tbody>
                         </table>
                     </div>
+                    <!-- Pagination -->
+                    <div v-if="totalPages > 1" class="d-flex justify-content-center align-items-center gap-1 py-3 border-top">
+                        <button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === 1" @click="currentPage = 1" title="Halaman pertama">
+                            <i class="fa-solid fa-angles-left"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === 1" @click="currentPage--" title="Sebelumnya">
+                            <i class="fa-solid fa-angle-left"></i>
+                        </button>
+                        <template v-for="p in pageNumbers" :key="p">
+                            <span v-if="p === '...'" class="px-2 text-muted">...</span>
+                            <button
+                                v-else
+                                class="btn btn-sm"
+                                :class="p === currentPage ? 'btn-primary' : 'btn-outline-secondary'"
+                                @click="currentPage = p"
+                            >{{ p }}</button>
+                        </template>
+                        <button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === totalPages" @click="currentPage++" title="Berikutnya">
+                            <i class="fa-solid fa-angle-right"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === totalPages" @click="currentPage = totalPages" title="Halaman terakhir">
+                            <i class="fa-solid fa-angles-right"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -417,7 +459,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import axios from 'axios';
 import Swal from 'sweetalert2';
 import * as bootstrap from 'bootstrap';
@@ -677,7 +719,38 @@ const resetFilters = () => {
     searchQuery.value = '';
     filterStatus.value = 'all';
     filterKelas.value = 'all';
+    currentPage.value = 1;
 };
+
+// ?????? Pagination ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+const currentPage = ref(1);
+const perPage = ref(25);
+
+const totalFiltered = computed(() => filteredSessions.value.length);
+const totalPages = computed(() => Math.ceil(totalFiltered.value / perPage.value));
+
+const paginatedSessions = computed(() => {
+    const start = (currentPage.value - 1) * perPage.value;
+    return filteredSessions.value.slice(start, start + perPage.value);
+});
+
+const pageNumbers = computed(() => {
+    const pages = [];
+    const total = totalPages.value;
+    const current = currentPage.value;
+    if (total <= 7) {
+        for (let i = 1; i <= total; i++) pages.push(i);
+    } else {
+        pages.push(1);
+        if (current > 3) pages.push('...');
+        for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) pages.push(i);
+        if (current < total - 2) pages.push('...');
+        pages.push(total);
+    }
+    return pages;
+});
+
+watch([searchQuery, filterStatus, filterKelas], () => { currentPage.value = 1; });
 
 const confirmUnlock = (session) => {
     Swal.fire({
@@ -936,3 +1009,4 @@ const logout = async () => {
     border: none;
 }
 </style>
+

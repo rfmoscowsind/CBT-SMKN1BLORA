@@ -7,14 +7,30 @@ use Illuminate\Support\Facades\Redis;
 
 class RadarWorker extends Command
 {
-    protected $signature = 'cbt:radar-worker';
+    protected $signature = 'cbt:radar-worker {--sleep=2} {--max-iterations=0} {--max-memory=256}';
     protected $description = 'Worker untuk mengumpulkan data sesi ujian aktif ke Redis (Radar Nilai Real-Time)';
 
     public function handle()
     {
         $this->info("Memulai CBT Radar Worker...");
-        
-        while (true) {
+
+        $sleep = max(1, (int) $this->option('sleep'));
+        $maxIterations = max(0, (int) $this->option('max-iterations'));
+        $maxMemory = max(32, (int) $this->option('max-memory'));
+        $iteration = 0;
+        $running = true;
+
+        if (function_exists('pcntl_async_signals')) {
+            pcntl_async_signals(true);
+            pcntl_signal(SIGTERM, function () use (&$running): void {
+                $running = false;
+            });
+            pcntl_signal(SIGINT, function () use (&$running): void {
+                $running = false;
+            });
+        }
+
+        while ($running) {
             try {
                 // Radar hanya menampilkan siswa yang sudah memulai ujian.
                 // Sesi dibuat oleh ExamService::start() setelah token valid/ujian dikonfirmasi.
@@ -79,11 +95,26 @@ class RadarWorker extends Command
 
                 Redis::set('cbt:radar:live', json_encode($radarData));
 
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $this->error("Error: " . $e->getMessage());
             }
 
-            sleep(2);
+            $iteration++;
+            if ($maxIterations > 0 && $iteration >= $maxIterations) {
+                break;
+            }
+
+            $memoryMb = memory_get_usage(true) / 1024 / 1024;
+            if ($memoryMb >= $maxMemory) {
+                $this->warn("Radar worker berhenti: memory {$memoryMb}MB melewati limit {$maxMemory}MB.");
+                break;
+            }
+
+            sleep($sleep);
         }
+
+        $this->info("CBT Radar Worker berhenti.");
+
+        return self::SUCCESS;
     }
 }

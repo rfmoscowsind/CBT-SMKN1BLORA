@@ -270,9 +270,6 @@ const fetchExamData = async () => {
     isLoading.value = true;
     try {
         const res = await axios.get(`/ujian/sesi/${sessionHash.value}`, {
-            params: {
-                device_raw: generateDeviceFingerprint().components
-            },
             headers: { 
                 'Accept': 'application/json',
                 'X-Device-Fingerprint': deviceFp.value
@@ -316,8 +313,7 @@ const fetchSoal = async (nomor) => {
     try {
         const res = await axios.get(`/ujian/sesi/${sessionHash.value}/soal`, {
             params: { 
-                nomor,
-                device_raw: generateDeviceFingerprint().components
+                nomor
             },
             headers: { 
                 'Accept': 'application/json',

@@ -224,28 +224,24 @@
                         <div class="overview-card">
                             <div class="overview-card-header">
                                 <div>
-                                    <div class="overview-title">{{ overview.redis_backup.name }}</div>
-                                    <div class="overview-host">{{ overview.redis_backup.host }}:{{ overview.redis_backup.port }}</div>
+                                    <div class="overview-title">{{ overview.pgbouncer.name }}</div>
+                                    <div class="overview-host">{{ overview.pgbouncer.host }}:{{ overview.pgbouncer.port }}</div>
                                 </div>
-                                <span class="status-pill" :class="statusClass(overview.redis_backup.status)">{{ statusText(overview.redis_backup.status) }}</span>
+                                <span class="status-pill" :class="statusClass(overview.pgbouncer.status)">{{ statusText(overview.pgbouncer.status) }}</span>
                             </div>
                             <div class="db-meta">
-                                <div><span>Memory</span><strong>{{ overview.redis_backup.memory.used }}</strong></div>
-                                <div><span>Peak</span><strong>{{ overview.redis_backup.memory.peak }}</strong></div>
-                                <div><span>QPS</span><strong>{{ qpsText(overview.redis_backup.qps) }}</strong></div>
-                                <div><span>Clients</span><strong>{{ overview.redis_backup.clients ?? '-' }}</strong></div>
-                                <div><span>Hit Rate</span><strong>{{ percentText(overview.redis_backup.hit_rate) }}</strong></div>
-                                <div><span>Uptime</span><strong>{{ overview.redis_backup.uptime_days ?? '-' }} hari</strong></div>
+                                <div><span>Database</span><strong>{{ overview.pgbouncer.database }}</strong></div>
+                                <div><span>Pool Mode</span><strong>{{ overview.pgbouncer.pool_mode }}</strong></div>
+                                <div><span>Client Aktif</span><strong>{{ overview.pgbouncer.clients_active ?? '-' }}</strong></div>
+                                <div><span>Client Tunggu</span><strong>{{ overview.pgbouncer.clients_waiting ?? '-' }}</strong></div>
+                                <div><span>Server Aktif</span><strong>{{ overview.pgbouncer.servers_active ?? '-' }}</strong></div>
+                                <div><span>Server Idle</span><strong>{{ overview.pgbouncer.servers_idle ?? '-' }}</strong></div>
+                                <div><span>Avg Query</span><strong>{{ latencyText(overview.pgbouncer.avg_query_ms) }}</strong></div>
+                                <div><span>Avg Wait</span><strong>{{ latencyText(overview.pgbouncer.avg_wait_ms) }}</strong></div>
                             </div>
-                            <div class="redis-keyspace mt-3" v-if="overview.redis_backup.keyspace.length">
-                                <div class="metric-label mb-2">Keyspace</div>
-                                <div class="keyspace-row" v-for="db in overview.redis_backup.keyspace" :key="db.db">
-                                    <span>{{ db.db }}</span>
-                                    <strong>{{ db.keys }} keys</strong>
-                                    <small>{{ db.expires }} exp</small>
-                                </div>
+                            <div class="overview-foot mt-3 text-truncate" :title="overview.pgbouncer.message">
+                                {{ overview.pgbouncer.version || '-' }} | Query: {{ overview.pgbouncer.total_queries ?? '-' }} | Xact: {{ overview.pgbouncer.total_xacts ?? '-' }}
                             </div>
-                            <div class="overview-foot mt-3">Frag: {{ overview.redis_backup.memory.fragmentation ?? '-' }} | Max: {{ overview.redis_backup.memory.max }}</div>
                         </div>
                     </div>
                     <div class="col-12 text-end">
@@ -310,6 +306,25 @@ const emptyRedisOverview = (name = 'Redis') => ({
     keyspace: [],
     message: '-',
 });
+const emptyPgbouncerOverview = () => ({
+    name: 'PgBouncer',
+    host: '-',
+    port: '-',
+    status: 'unknown',
+    version: '-',
+    database: '-',
+    pool_mode: '-',
+    clients_active: null,
+    clients_waiting: null,
+    servers_active: null,
+    servers_idle: null,
+    max_wait: null,
+    avg_query_ms: null,
+    avg_wait_ms: null,
+    total_queries: null,
+    total_xacts: null,
+    message: '-',
+});
 const overview = ref({
     main_server: {
         name: 'Server Utama',
@@ -322,7 +337,7 @@ const overview = ref({
     primary_db: { name: 'DB Utama', host: '-', port: '-', database: '-', status: 'unknown', role: '-', latency_ms: null, size: '-', connections: null, db_time: null, message: '-' },
     secondary_db: { name: 'Server 2 DB', host: '-', port: '-', database: '-', status: 'unknown', role: '-', latency_ms: null, size: '-', connections: null, db_time: null, message: '-' },
     redis_primary: emptyRedisOverview('Redis Primary'),
-    redis_backup: emptyRedisOverview('Redis Backup'),
+    pgbouncer: emptyPgbouncerOverview(),
 });
 
 let intervalStats = null;
@@ -357,7 +372,7 @@ const overviewHealthy = computed(() =>
     && overview.value.primary_db.status === 'online'
     && overview.value.secondary_db.status === 'online'
     && overview.value.redis_primary.status === 'online'
-    && overview.value.redis_backup.status === 'online'
+    && overview.value.pgbouncer.status === 'online'
 );
 
 const statusClass = status => status === 'online'
