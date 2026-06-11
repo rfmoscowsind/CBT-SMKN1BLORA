@@ -34,6 +34,7 @@ const routes = [
 
     // ── Dashboards ────────────────────────────────────────────────
     { path: '/vue/dashboard/superadmin', name: 'SuperAdminDashboard', component: SuperAdminDashboard },
+    { path: '/vue/dashboard/admin', name: 'AdminDashboard', component: PanitiaDashboard },
     { path: '/vue/dashboard/panitia', name: 'PanitiaDashboard', component: PanitiaDashboard },
     { path: '/vue/dashboard/guru', name: 'GuruDashboard', component: GuruDashboard },
     { path: '/vue/dashboard/pengawas', name: 'PengawasDashboard', component: PengawasDashboard },

@@ -240,6 +240,7 @@ let syncPromise = null;
 
 const sisaWaktuDetik = ref(0); 
 let intervalTimer = null;
+let timerDeadlineMs = null;
 let STORAGE_KEY = '';
 let PENDING_STORAGE_KEY = '';
 
@@ -298,7 +299,7 @@ const fetchExamData = async () => {
         applyPendingNavigationState();
 
         // Sync timer dari server saat init
-        sisaWaktuDetik.value = res.data.sisa_detik;
+        syncTimerFromServer(res.data.sisa_detik, { force: true });
         startTimer();
 
         // Muat soal pertama
@@ -337,11 +338,8 @@ const fetchSoal = async (nomor) => {
             return;
         }
 
-        // ?????? Sync sisa waktu dari server ??????????????????????????????????????????????????????????????????????????????????????????
-        // Toleransi: hanya update jika beda > 5 detik (hindari flicker)
-        if (Math.abs(sisaWaktuDetik.value - res.data.sisa_detik) > 5) {
-            sisaWaktuDetik.value = res.data.sisa_detik;
-        }
+        // Sync sisa waktu dari server dengan toleransi agar tampilan tidak flicker.
+        syncTimerFromServer(res.data.sisa_detik);
 
         // ?????? Set soal aktif ?????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
         currentSoal.value = {
@@ -508,16 +506,34 @@ const muatJawabanLokal = (nomor) => {
     }
 };
 
+const syncTimerFromServer = (seconds, { force = false } = {}) => {
+    const nextSeconds = Math.max(0, Number(seconds) || 0);
+    if (force || timerDeadlineMs === null || Math.abs(sisaWaktuDetik.value - nextSeconds) > 5) {
+        sisaWaktuDetik.value = nextSeconds;
+        timerDeadlineMs = Date.now() + (nextSeconds * 1000);
+    }
+};
+
+const tickTimer = () => {
+    if (timerDeadlineMs === null) return;
+
+    const remaining = Math.max(0, Math.ceil((timerDeadlineMs - Date.now()) / 1000));
+    sisaWaktuDetik.value = remaining;
+
+    if (remaining <= 0) {
+        clearInterval(intervalTimer);
+        intervalTimer = null;
+        waktuHabis();
+    }
+};
+
 const startTimer = () => {
-    if(intervalTimer) clearInterval(intervalTimer);
-    intervalTimer = setInterval(() => {
-        if (sisaWaktuDetik.value > 0) {
-            sisaWaktuDetik.value--;
-        } else {
-            clearInterval(intervalTimer);
-            waktuHabis();
-        }
-    }, 1000);
+    if (intervalTimer) clearInterval(intervalTimer);
+    if (timerDeadlineMs === null) {
+        syncTimerFromServer(sisaWaktuDetik.value, { force: true });
+    }
+    tickTimer();
+    intervalTimer = setInterval(tickTimer, 1000);
 };
 
 const waktuHabis = () => {
@@ -595,8 +611,8 @@ const syncPendingAnswers = async ({ silent = true } = {}) => {
                 }
             });
 
-            if (response.data?.sisa_detik !== undefined && Math.abs(sisaWaktuDetik.value - response.data.sisa_detik) > 5) {
-                sisaWaktuDetik.value = response.data.sisa_detik;
+            if (response.data?.sisa_detik !== undefined) {
+                syncTimerFromServer(response.data.sisa_detik);
             }
 
             payloads.forEach(clearPendingAnswer);
@@ -716,9 +732,7 @@ const simpanJawabanKeServer = async (soal, pendingPayload = null) => {
 
         // Sync sisa waktu dari respons server
         if (res.data?.sisa_detik !== undefined) {
-            if (Math.abs(sisaWaktuDetik.value - res.data.sisa_detik) > 5) {
-                sisaWaktuDetik.value = res.data.sisa_detik;
-            }
+            syncTimerFromServer(res.data.sisa_detik);
         }
 
         // Update status terjawab di navigasi lokal
@@ -809,6 +823,7 @@ onMounted(() => {
 
 onUnmounted(() => {
     if (intervalTimer) clearInterval(intervalTimer);
+    timerDeadlineMs = null;
     clearTimeout(debounceTimer);
     window.removeEventListener('online', updateOnlineStatus);
     window.removeEventListener('offline', updateOnlineStatus);

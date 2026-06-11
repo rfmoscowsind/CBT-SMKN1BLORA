@@ -10,11 +10,34 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 
 axios.defaults.headers.common.Accept = 'application/json';
 axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
+axios.defaults.withCredentials = true;
 
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
 if (csrfToken) {
     axios.defaults.headers.common['X-CSRF-TOKEN'] = csrfToken;
 }
+
+let sessionRedirecting = false;
+axios.interceptors.response.use(
+    response => response,
+    error => {
+        const status = error?.response?.status;
+        if ((status === 401 || status === 419) && !sessionRedirecting && window.location.pathname !== '/login') {
+            sessionRedirecting = true;
+            try {
+                sessionStorage.clear();
+            } catch (_) {
+                // Ignore storage errors in restricted browser modes.
+            }
+
+            const loginUrl = new URL('/login', window.location.origin);
+            loginUrl.searchParams.set('session_expired', 'true');
+            window.location.replace(loginUrl.toString());
+        }
+
+        return Promise.reject(error);
+    }
+);
 
 const app = createApp(App);
 

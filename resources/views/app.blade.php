@@ -21,9 +21,7 @@
                         return caches.delete(key);
                     }));
                 }) : Promise.resolve(),
-            ]).finally(function () {
-                navigator.serviceWorker.register('/sw.js?v=8');
-            });
+            ]).catch(function () {});
         }
     </script>
 </head>

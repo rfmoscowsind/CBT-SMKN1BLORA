@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-06-11 - Implementasi Fix Login, Monitoring, dan Beban Submit
+
+### Fixed
+- Menambahkan `axios.defaults.withCredentials = true` dan interceptor global `401/419` di `resources/js/main.js` agar session expired diarahkan bersih ke login.
+- Menambahkan route Vue `/vue/dashboard/admin` sebagai alias dashboard panitia agar redirect role `Admin` tidak jatuh ke fallback `/dashboard`.
+- Menghentikan registrasi Service Worker baru di template app/layout sambil tetap membersihkan worker dan cache lama untuk mengurangi risiko state/cache login nyangkut.
+- Menghapus eksekusi `proc_open()`/`psql` dari request `/monitoring/stats`; route sekarang membaca snapshot PgBouncer dari cache.
+- Menambahkan command `monitoring:pgbouncer-snapshot` dan jadwal tiap menit untuk mengisi snapshot PgBouncer di cache.
+- Mengubah `ExamService::flushAll()` menjadi bulk upsert PostgreSQL per sesi dengan guard `server_updated_at` agar submit massal tidak menembakkan query per jawaban.
+- Mengubah timer `ExamInterface.vue` menjadi berbasis deadline absolut `Date.now()` agar tidak ngaret saat tab browser di-background.
+
+### Documentation
+- Memperbarui `newgemini.md` dengan status implementasi fix per lokasi kode.
+
+## 2026-06-11 - Dokumentasi Verifikasi Analisis Gemini
+
+### Added
+- Menambahkan `newgemini.md` sebagai dokumen verifikasi analisis Gemini terkait login, cookie/session, Service Worker, router fallback, monitoring PgBouncer, bulk submit jawaban, dan timer ujian.
+
+### Notes
+- Dokumen mengelompokkan klaim menjadi `VALID`, `KURANG TEPAT`, dan `TAMBAHAN` berdasarkan kode aktual.
+- Tidak ada perubahan kode aplikasi, konfigurasi runtime, service, atau build asset pada entry ini.
+
 ## 2026-06-11 - Fix Login 500 Device Fingerprint History
 
 ### Fixed

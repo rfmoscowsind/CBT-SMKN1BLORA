@@ -570,7 +570,7 @@ class ExamService
             $a = json_decode($raw, true);
             $q = $questions->get($soalId);
 
-            if (!$q) {
+            if (!$q || ! is_array($a)) {
                 $forgetFields[$soalIdStr] = $raw;
                 continue;
             }
@@ -579,7 +579,8 @@ class ExamService
             $status = 'pending_manual';
             if ($q->tipe_soal === 'PG') {
                 $correctOptId = $correctOptions[$q->id] ?? null;
-                $ok = $correctOptId && (int)$a['opsi_jawaban_id'] === (int)$correctOptId;
+                $answerOptId = isset($a['opsi_jawaban_id']) ? (int) $a['opsi_jawaban_id'] : null;
+                $ok = $correctOptId && $answerOptId !== null && $answerOptId === (int)$correctOptId;
                 $score  = $ok ? $q->bobot_nilai : 0;
                 $status = 'auto_scored';
             }
@@ -590,8 +591,10 @@ class ExamService
         }
 
         DB::transaction(function () use ($rowsToPersist, $sessionId) {
-            foreach ($rowsToPersist as [$soalId, $a, $q, $score, $status]) {
-                if ($this->persistAnswerIfNewer($sessionId, $soalId, $a, $q, $score, $status)) {
+            $persistedIds = array_flip($this->persistAnswersIfNewerBulk($sessionId, $rowsToPersist));
+
+            foreach ($rowsToPersist as [$soalId, $a]) {
+                if (isset($persistedIds[$soalId])) {
                     $this->recordAnswerAuditSafely($sessionId, $soalId, $a);
                 }
             }
@@ -607,6 +610,73 @@ class ExamService
         $status = DB::table('sesi_ujians')->where('id', $sessionId)->value('status');
 
         return in_array($status, ['aktif', 'selesai', 'terkunci'], true);
+    }
+
+    private function persistAnswersIfNewerBulk(int $sessionId, array $rowsToPersist): array
+    {
+        if (empty($rowsToPersist)) {
+            return [];
+        }
+
+        if (DB::getDriverName() !== 'pgsql') {
+            $persisted = [];
+            foreach ($rowsToPersist as [$soalId, $answer, $question, $score, $status]) {
+                if ($this->persistAnswerIfNewer($sessionId, $soalId, $answer, $question, $score, $status)) {
+                    $persisted[] = (int) $soalId;
+                }
+            }
+
+            return $persisted;
+        }
+
+        $now = now();
+        $placeholders = [];
+        $bindings = [];
+
+        foreach ($rowsToPersist as [$soalId, $answer, $question, $score, $status]) {
+            $placeholders[] = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+            array_push(
+                $bindings,
+                $sessionId,
+                $soalId,
+                $answer['opsi_jawaban_id'] ?? null,
+                $answer['jawaban_essay'] ?? null,
+                $question->tipe_soal,
+                $score,
+                $status,
+                $answer['client_updated_at'] ?? null,
+                $answer['server_updated_at'] ?? null,
+                $now,
+                $now
+            );
+        }
+
+        $rows = DB::select(
+            "
+            INSERT INTO jawaban_siswas (
+                sesi_ujian_id, bank_soal_id, opsi_jawaban_id, jawaban_essay,
+                tipe_soal, skor, scoring_status, client_updated_at,
+                server_updated_at, created_at, updated_at
+            )
+            VALUES ".implode(', ', $placeholders)."
+            ON CONFLICT (sesi_ujian_id, bank_soal_id)
+            DO UPDATE SET
+                opsi_jawaban_id = EXCLUDED.opsi_jawaban_id,
+                jawaban_essay = EXCLUDED.jawaban_essay,
+                tipe_soal = EXCLUDED.tipe_soal,
+                skor = EXCLUDED.skor,
+                scoring_status = EXCLUDED.scoring_status,
+                client_updated_at = EXCLUDED.client_updated_at,
+                server_updated_at = EXCLUDED.server_updated_at,
+                updated_at = EXCLUDED.updated_at
+            WHERE jawaban_siswas.server_updated_at IS NULL
+               OR EXCLUDED.server_updated_at >= jawaban_siswas.server_updated_at
+            RETURNING bank_soal_id
+            ",
+            $bindings
+        );
+
+        return array_map(fn ($row) => (int) $row->bank_soal_id, $rows);
     }
 
     private function persistAnswerIfNewer(int $sessionId, int $soalId, array $answer, object $question, float|int $score, string $status): bool
