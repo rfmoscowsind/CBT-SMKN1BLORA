@@ -205,19 +205,11 @@ class ExamService
     /**
      * Hitung sisa waktu ujian dalam detik.
      *
-     * Gunakan request-scoped cache agar aman di worker long-running/Octane.
+     * Query langsung agar tidak ada state container yang stale di worker Octane.
      */
     public function remaining(object $s): int
     {
-        $key = 'exam.schedule.remaining.' . $s->jadwal_ujian_id;
-
-        if (app()->bound($key)) {
-            $j = app($key);
-        } else {
-            $j = DB::table('jadwal_ujians')->find($s->jadwal_ujian_id);
-            app()->instance($key, $j);
-        }
-
+        $j = DB::table('jadwal_ujians')->find($s->jadwal_ujian_id);
         abort_unless($j, 404, 'Jadwal ujian tidak ditemukan.');
 
         $deadline = min(
@@ -694,6 +686,10 @@ class ExamService
 
     private function recordAnswerAuditSafely(int $sessionId, int $soalId, array $answer): void
     {
+        if (! config('app.audit_answer_saved', false)) {
+            return;
+        }
+
         try {
             $this->auditAnswerSaved($sessionId, $soalId, $answer);
         } catch (\Throwable $exception) {

@@ -1,5 +1,59 @@
 # Changelog
 
+## 2026-06-11 - Fix Login 500 Device Fingerprint History
+
+### Fixed
+- Memperbaiki error login siswa yang kadang menghasilkan HTTP 500 karena insert `device_fingerprint_histories.lock_enabled` mengirim integer `0/1` ke kolom PostgreSQL boolean.
+- Nilai `lock_enabled` sekarang dikirim sebagai ekspresi boolean database (`true`/`false`) agar konsisten dengan perbaikan boolean PostgreSQL lain di jalur device lock.
+
+### Verification
+- `php -l app/Http/Controllers/Concerns/HandlesDeviceFingerprints.php` sukses.
+- Octane/RoadRunner direstart setelah patch.
+- Smoke test insert device fingerprint history untuk user siswa berhasil dalam transaksi rollback (`DEVICE_HISTORY_INSERT_OK`).
+- Error terakhir di `storage/logs/laravel.log` untuk `lock_enabled` terjadi sebelum patch, pada `2026-06-11 04:16:17`.
+
+## 2026-06-11 - Hardening Jalur Ujian dan Runtime Octane
+
+### Added
+- Menambahkan pending queue lokal di `ExamInterface.vue` untuk jawaban siswa yang belum terkonfirmasi server.
+- Menambahkan auto-sync batch ke endpoint `/ujian/sesi/{session}/sync` saat koneksi kembali online, sebelum pindah soal, dan sebelum submit final.
+- Menambahkan indikator sinkronisasi/pending jawaban agar siswa tahu masih ada jawaban lokal yang menunggu server.
+- Menambahkan service systemd template `cbt-answer-worker@.service` dan mengaktifkan 4 worker khusus queue `answers`.
+
+### Changed
+- Submit ujian sekarang diblok jika masih ada pending jawaban lokal yang gagal sinkron ke server.
+- Queue worker default dipisah dari queue jawaban: `cbt-worker.service` hanya memproses `default`, sementara `cbt-answer-worker@1..4` memproses `answers`.
+- Redis production diaktifkan AOF dengan `appendonly yes`, `appendfsync everysec`, RDB snapshot standar, dan `maxmemory-policy noeviction`.
+- `/monitoring/sessions` sekarang server-side filtered (`active`, `finished`, `recent`), dibatasi `limit`, dan di-cache pendek 3 detik.
+- Dashboard Panitia memakai scope monitoring eksplisit untuk sesi aktif dan hasil selesai.
+- `ExamService::remaining()`, `WebController::sessionItems()`, dan `ApiController::sessionItems()` tidak lagi memakai `app()->instance()` agar aman untuk Octane/RoadRunner long-running worker.
+- Audit `answer_saved` normal dibuat opt-in lewat `AUDIT_ANSWER_SAVED=false` untuk mengurangi write `audit_logs` saat ujian besar.
+- Fallback Redis client di `config/database.php` diselaraskan ke `phpredis`.
+
+### Fixed
+- Jawaban yang sebelumnya hanya tersimpan di `localStorage` kini tidak lagi hilang diam-diam saat submit; frontend wajib menyinkronkan pending queue sebelum menyelesaikan ujian.
+- Endpoint `/sync` web sekarang mengembalikan `sisa_detik` dan `server_updated_at` agar frontend bisa menyelaraskan timer setelah batch sync.
+
+### Runtime
+- Backup konfigurasi runtime dibuat di `/root/cbt-runtime-backups/20260611-040812`.
+- Service aktif dan enabled setelah reload: `laravel-octane-cbt`, `cbt-worker`, `cbt-answer-worker@1..4`, `cbt-radar`, `nginx`, dan `redis-server`.
+- Laravel cache diperbarui dengan `optimize:clear`, `config:cache`, `view:cache`, `event:cache`, lalu Octane dan worker direstart.
+
+### Verification
+- `npm run build` sukses dan menghasilkan asset baru untuk `ExamInterface` serta `PanitiaDashboard`.
+- `php -l` sukses untuk route/controller/service/config yang diubah.
+- `php artisan config:show database.redis.client` menghasilkan `phpredis`.
+- `php artisan config:show app.audit_answer_saved` menghasilkan `false`.
+- `redis-cli INFO persistence` menunjukkan `aof_enabled:1` dan rewrite status `ok`.
+- `ps` menunjukkan 4 worker `--queue=answers` dan 1 worker `--queue=default`.
+- `curl https://cbt.madnnet.my.id/login` menghasilkan HTTP 200.
+- `curl https://cbt.madnnet.my.id/readyz` menghasilkan DB dan Redis `true`.
+- Login smoke test superadmin berhasil menuju `/vue/dashboard/superadmin` dan `/monitoring/sessions?scope=active&limit=5` menghasilkan HTTP 200.
+
+### Test Notes
+- `php artisan test --stop-on-failure` menjalankan 14 test pass lalu berhenti pada test lama `api permission matrix controls module access`: expected 403 tetapi menerima 200 untuk `/api/v1/guru/paket-soal` setelah permission `manage-questions` dicabut.
+- Failure tersebut berada di area permission API dan tidak terkait langsung dengan perubahan pending sync/Redis/worker, tetapi perlu ditindaklanjuti terpisah.
+
 ## 2026-06-10 - Implementasi Fitur Batch Jadwal Multi-Grup
 
 ### Added

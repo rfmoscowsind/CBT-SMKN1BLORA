@@ -493,59 +493,87 @@ Route::middleware('auth')->group(function () {
     });
     Route::get('/monitoring/sessions', function() {
         abort_unless(Auth::user()?->can('monitor-exams') || in_array(Auth::user()?->role, ['SuperAdmin', 'Admin', 'Pengawas'], true), 403);
-        $sessions = DB::table('sesi_ujians as s')
-            ->join('users as u','u.id','=','s.user_id')
-            ->join('jadwal_ujians as j','j.id','=','s.jadwal_ujian_id')
-            ->join('master_ujians as m','m.id','=','j.master_ujian_id')
-            ->select('s.*','u.name','u.username','j.durasi_menit','m.judul as mapel')
-            ->orderByDesc('s.id')
-            ->get();
 
-        if ($sessions->isEmpty()) {
-            return response()->json([]);
+        $scope = request()->query('scope', 'active');
+        $scope = in_array($scope, ['active', 'finished', 'recent'], true) ? $scope : 'active';
+        $limit = min(max((int) request()->query('limit', 500), 1), 1000);
+        $cacheKey = "monitoring:sessions:$scope:$limit";
+
+        $resolver = function () use ($scope, $limit) {
+            $query = DB::table('sesi_ujians as s')
+                ->join('users as u','u.id','=','s.user_id')
+                ->join('jadwal_ujians as j','j.id','=','s.jadwal_ujian_id')
+                ->join('master_ujians as m','m.id','=','j.master_ujian_id')
+                ->select('s.*','u.name','u.username','j.durasi_menit','m.judul as mapel')
+                ->orderByDesc('s.id')
+                ->limit($limit);
+
+            if ($scope === 'finished') {
+                $query->where('s.status', 'selesai')
+                    ->where('s.waktu_submit', '>=', now()->subDays(7));
+            } elseif ($scope === 'recent') {
+                $query->where(function ($q) {
+                    $q->whereIn('s.status', ['aktif', 'terkunci'])
+                        ->orWhere('s.updated_at', '>=', now()->subHours(6));
+                });
+            } else {
+                $query->whereIn('s.status', ['aktif', 'terkunci']);
+            }
+
+            $sessions = $query->get();
+
+            if ($sessions->isEmpty()) {
+                return [];
+            }
+
+            $sessionIds = $sessions->pluck('id')->all();
+
+            $answeredCounts = DB::table('jawaban_siswas')
+                ->whereIn('sesi_ujian_id', $sessionIds)
+                ->selectRaw('sesi_ujian_id, count(*) as cnt')
+                ->groupBy('sesi_ujian_id')
+                ->pluck('cnt', 'sesi_ujian_id')
+                ->all();
+
+            $totalCounts = DB::table('sesi_ujian_soals')
+                ->whereIn('sesi_ujian_id', $sessionIds)
+                ->selectRaw('sesi_ujian_id, count(*) as cnt')
+                ->groupBy('sesi_ujian_id')
+                ->pluck('cnt', 'sesi_ujian_id')
+                ->all();
+
+            $userIds = $sessions->pluck('user_id')->unique()->all();
+            $userKelasMap = DB::table('users')->whereIn('id',$userIds)->pluck('kelas_aktif_id','id')->all();
+            $classIds = array_values(array_filter(array_unique(array_map('intval', array_values($userKelasMap)))));
+            $className = empty($classIds)
+                ? collect()
+                : DB::table('kelas_aktifs')->whereIn('id', $classIds)->get()->keyBy('id');
+
+            $now = now();
+
+            return $sessions->map(function($x) use ($answeredCounts, $totalCounts, $className, $userKelasMap, $now){
+                $classId = $userKelasMap[$x->user_id] ?? null;
+                $x->kelas = $classId ? ($className->get($classId)?->nama_kelas ?? '-') : '-';
+                $x->terjawab = $answeredCounts[$x->id] ?? 0;
+                $x->total_soal = $totalCounts[$x->id] ?? 0;
+                $x->online = $x->last_seen_at && $now->diffInSeconds($x->last_seen_at) <= 30;
+
+                $deadline = \Carbon\Carbon::parse($x->waktu_login)->addMinutes($x->durasi_menit);
+                $remSeconds = max(0, $now->diffInSeconds($deadline, false));
+                $min = floor($remSeconds / 60);
+                $sec = $remSeconds % 60;
+                $x->sisa_waktu = sprintf('%02d:%02d', $min, $sec);
+
+                $x->device = json_decode($x->device_info, true)['user_agent'] ?? '-';
+                return $x;
+            })->values()->all();
+        };
+
+        try {
+            $result = \Illuminate\Support\Facades\Cache::remember($cacheKey, 3, $resolver);
+        } catch (\Throwable $exception) {
+            $result = $resolver();
         }
-
-        $sessionIds = $sessions->pluck('id')->all();
-
-        $answeredCounts = DB::table('jawaban_siswas')
-            ->whereIn('sesi_ujian_id', $sessionIds)
-            ->selectRaw('sesi_ujian_id, count(*) as cnt')
-            ->groupBy('sesi_ujian_id')
-            ->pluck('cnt', 'sesi_ujian_id')
-            ->all();
-
-        $totalCounts = DB::table('sesi_ujian_soals')
-            ->whereIn('sesi_ujian_id', $sessionIds)
-            ->selectRaw('sesi_ujian_id, count(*) as cnt')
-            ->groupBy('sesi_ujian_id')
-            ->pluck('cnt', 'sesi_ujian_id')
-            ->all();
-
-        $className = DB::table('kelas_aktifs')->get()->keyBy('id');
-
-        $userIds = $sessions->pluck('user_id')->unique()->all();
-        $userKelasMap = DB::table('users')->whereIn('id',$userIds)->pluck('kelas_aktif_id','id')->all();
-
-        // PERF-3 FIX: Capture now() once outside the map loop instead of calling it per iteration.
-        // Also fix now()->parse() — that is not a real Carbon method; use Carbon::parse() instead.
-        $now = now();
-
-        $result = $sessions->map(function($x) use ($answeredCounts, $totalCounts, $className, $userKelasMap, $now){
-            $classId = $userKelasMap[$x->user_id] ?? null;
-            $x->kelas = $classId ? ($className->get($classId)?->nama_kelas ?? '-') : '-';
-            $x->terjawab = $answeredCounts[$x->id] ?? 0;
-            $x->total_soal = $totalCounts[$x->id] ?? 0;
-            $x->online = $x->last_seen_at && $now->diffInSeconds($x->last_seen_at) <= 30;
-
-            $deadline = \Carbon\Carbon::parse($x->waktu_login)->addMinutes($x->durasi_menit);
-            $remSeconds = max(0, $now->diffInSeconds($deadline, false));
-            $min = floor($remSeconds / 60);
-            $sec = $remSeconds % 60;
-            $x->sisa_waktu = sprintf('%02d:%02d', $min, $sec);
-
-            $x->device = json_decode($x->device_info, true)['user_agent'] ?? '-';
-            return $x;
-        });
 
         return response()->json($result);
     });

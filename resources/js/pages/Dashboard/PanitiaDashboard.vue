@@ -163,10 +163,15 @@ const fetchDashboardData = async () => {
         const resStats = await axios.get('/monitoring/stats', { headers: { 'Accept': 'application/json' } });
         if (resStats.data) stats.value = resStats.data;
 
-        const resSessions = await axios.get('/monitoring/sessions', { headers: { 'Accept': 'application/json' } });
-        if (resSessions.data && Array.isArray(resSessions.data)) {
-            sesiBermasalah.value = resSessions.data.filter(s => ['aktif', 'terkunci'].includes(s.status));
-            const finished = resSessions.data.filter(s => s.status === 'selesai');
+        const [resActiveSessions, resFinishedSessions] = await Promise.all([
+            axios.get('/monitoring/sessions?scope=active', { headers: { 'Accept': 'application/json' } }),
+            axios.get('/monitoring/sessions?scope=finished&limit=300', { headers: { 'Accept': 'application/json' } }),
+        ]);
+        if (Array.isArray(resActiveSessions.data)) {
+            sesiBermasalah.value = resActiveSessions.data;
+        }
+        if (Array.isArray(resFinishedSessions.data)) {
+            const finished = resFinishedSessions.data;
             const uniqueFinished = [];
             const seenMapel = new Set();
             finished.forEach(s => {

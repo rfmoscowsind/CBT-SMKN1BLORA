@@ -253,7 +253,13 @@ class WebController extends Controller
 
         $synced = (int) ($result['saved'] ?? count($answers));
 
-        return response()->json(['success' => true, 'synced' => $synced, 'data' => ['synced' => $synced]]);
+        return response()->json([
+            'success' => true,
+            'synced' => $synced,
+            'sisa_detik' => $this->exams->remaining($session),
+            'server_updated_at' => now()->toISOString(),
+            'data' => ['synced' => $synced],
+        ]);
     }
 
     public function flag(Request $request, string $id)
@@ -518,15 +524,10 @@ class WebController extends Controller
 
     private function sessionItems(int $sessionId)
     {
-        $key = "exam.session-items.$sessionId";
-        if (app()->bound($key)) {
-            return app($key);
-        }
-
-        $items = DB::table('sesi_ujian_soals')->where('sesi_ujian_id', $sessionId)->orderBy('nomor_soal')->get();
-        app()->instance($key, $items);
-
-        return $items;
+        return DB::table('sesi_ujian_soals')
+            ->where('sesi_ujian_id', $sessionId)
+            ->orderBy('nomor_soal')
+            ->get();
     }
 
     private function questionList(object $session, $items)
@@ -695,15 +696,11 @@ class WebController extends Controller
 
     private function studentProfile(User $user): array
     {
-        $requestKey = "student-profile.request.{$user->id}";
-        if (app()->bound($requestKey)) {
-            return app($requestKey);
-        }
-
-        $profile = $this->rememberControllerValue("student-profile:{$user->id}:v1", 900, fn () => $this->buildStudentProfile($user));
-        app()->instance($requestKey, $profile);
-
-        return $profile;
+        return $this->rememberControllerValue(
+            "student-profile:{$user->id}:v1",
+            900,
+            fn () => $this->buildStudentProfile($user)
+        );
     }
 
     private function buildStudentProfile(User $user): array

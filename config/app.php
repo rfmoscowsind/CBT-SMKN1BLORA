@@ -101,6 +101,8 @@ return [
 
     'id_codec_salt' => env('ID_CODEC_SALT'),
 
+    'audit_answer_saved' => (bool) env('AUDIT_ANSWER_SAVED', false),
+
     'previous_keys' => [
         ...array_filter(
             explode(',', (string) env('APP_PREVIOUS_KEYS', ''))

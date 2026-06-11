@@ -321,15 +321,10 @@ class ApiController extends Controller
 
     private function sessionItems(int $sessionId)
     {
-        $key = "exam.session-items.$sessionId";
-        if (app()->bound($key)) {
-            return app($key);
-        }
-
-        $items = DB::table('sesi_ujian_soals')->where('sesi_ujian_id', $sessionId)->orderBy('nomor_soal')->get();
-        app()->instance($key, $items);
-
-        return $items;
+        return DB::table('sesi_ujian_soals')
+            ->where('sesi_ujian_id', $sessionId)
+            ->orderBy('nomor_soal')
+            ->get();
     }
 
     private function updateQuestionFlags(int $sessionId, array $flags): void

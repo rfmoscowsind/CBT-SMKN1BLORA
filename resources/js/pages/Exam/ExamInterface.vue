@@ -85,6 +85,7 @@
                                 rows="5" 
                                 v-model="currentSoal.jawaban_siswa"
                                 placeholder="Ketik jawaban Anda di sini..."
+                                @input="simpanJawabanLokal(currentSoal)"
                                 @blur="simpanJawaban(currentSoal)"
                                 :disabled="isSaving"
                             ></textarea>
@@ -195,6 +196,10 @@
             <div v-if="!isOnline" class="badge bg-danger p-3 shadow-lg fs-6 rounded-pill">
                 <i class="fa-solid fa-wifi-slash me-2"></i> Koneksi Terputus - Jawaban Disimpan Lokal
             </div>
+            <div v-else-if="isSyncing || pendingCount > 0" class="badge bg-warning text-dark p-3 shadow-lg fs-6 rounded-pill">
+                <i class="fa-solid fa-rotate me-2" :class="{ 'fa-spin': isSyncing }"></i>
+                {{ isSyncing ? 'Menyinkronkan jawaban...' : `${pendingCount} jawaban menunggu sinkron` }}
+            </div>
         </div>
     </div>
 </template>
@@ -225,14 +230,18 @@ const isOnline = ref(navigator.onLine);
 const isSaving = ref(false);
 const isSubmitting = ref(false);
 const isLoading = ref(true);
+const isSyncing = ref(false);
+const pendingAnswers = ref({});
 const deviceFp = ref('');
 
 let debounceTimer = null;
 let modalKonfirmasiInstance = null;
+let syncPromise = null;
 
 const sisaWaktuDetik = ref(0); 
 let intervalTimer = null;
 let STORAGE_KEY = '';
+let PENDING_STORAGE_KEY = '';
 
 const forceLoginAgain = () => {
     Swal.fire({
@@ -248,6 +257,7 @@ const forceLoginAgain = () => {
 
 const jumlahKosong   = computed(() => navigasi.value.filter(n => !n.terjawab).length);
 const jumlahTerjawab = computed(() => navigasi.value.filter(n => n.terjawab).length);
+const pendingCount = computed(() => Object.keys(pendingAnswers.value).length);
 const hasAnswer = (value) => value !== null && value !== undefined && String(value).trim() !== '';
 const updateNavigationState = (nomor, jawaban, ragu = null) => {
     const nav = navigasi.value.find(n => Number(n.nomor) === Number(nomor));
@@ -285,6 +295,7 @@ const fetchExamData = async () => {
         siswa.value       = res.data.siswa;
         navigasi.value    = res.data.navigasi;   // [{nomor, terjawab, ragu}]
         totalSoal.value   = res.data.total_soal;
+        applyPendingNavigationState();
 
         // Sync timer dari server saat init
         sisaWaktuDetik.value = res.data.sisa_detik;
@@ -365,23 +376,115 @@ const fetchSoal = async (nomor) => {
 };
 
 
-// loadJawabanLokal: diganti muatJawabanLokal(nomor) per-soal
+const persistPendingAnswers = () => {
+    if (!PENDING_STORAGE_KEY) return;
+    localStorage.setItem(PENDING_STORAGE_KEY, JSON.stringify(pendingAnswers.value));
+};
 
-const simpanJawabanLokal = () => {
-    if (!currentSoal.value || !currentNomor.value) return;
-    const nomor = currentSoal.value.nomor || currentNomor.value;
-    const key = `${STORAGE_KEY}_${nomor}`;
+const loadPendingAnswers = () => {
+    if (!PENDING_STORAGE_KEY) return;
+
+    try {
+        const raw = localStorage.getItem(PENDING_STORAGE_KEY);
+        pendingAnswers.value = raw ? (JSON.parse(raw) || {}) : {};
+    } catch (e) {
+        console.error('Gagal memuat antrean jawaban lokal', e);
+        pendingAnswers.value = {};
+    }
+};
+
+const applyPendingNavigationState = () => {
+    Object.values(pendingAnswers.value).forEach((payload) => {
+        if (!payload?.nomor) return;
+        updateNavigationState(payload.nomor, payload.jawaban_siswa, payload.ragu);
+    });
+};
+
+const buildPendingPayload = (soal, clientUpdatedAt = new Date().toISOString()) => ({
+    nomor: soal.nomor || currentNomor.value,
+    soal_hash: soal.hash_id,
+    tipe: soal.tipe,
+    opsi_hash: soal.tipe === 'PG' ? (soal.jawaban_siswa || null) : null,
+    essay: soal.tipe === 'ISIAN' ? (soal.jawaban_siswa || null) : null,
+    jawaban_siswa: soal.jawaban_siswa,
+    ragu: Boolean(soal.ragu),
+    client_updated_at: clientUpdatedAt,
+    sync_status: 'pending',
+    retry_count: Number(pendingAnswers.value[soal.nomor || currentNomor.value]?.retry_count || 0),
+});
+
+const legacyAnswerKey = (nomor) => `${STORAGE_KEY}_${nomor}`;
+
+const removeLocalAnswer = (nomor) => {
+    localStorage.removeItem(legacyAnswerKey(nomor));
+    localStorage.removeItem(`_${nomor}`);
+};
+
+const clearPendingAnswer = (payload) => {
+    const current = pendingAnswers.value[payload.nomor];
+    if (current && current.client_updated_at !== payload.client_updated_at) {
+        return;
+    }
+
+    const next = { ...pendingAnswers.value };
+    delete next[payload.nomor];
+    pendingAnswers.value = next;
+    persistPendingAnswers();
+    removeLocalAnswer(payload.nomor);
+};
+
+const markPendingFailed = (payloads) => {
+    const next = { ...pendingAnswers.value };
+
+    payloads.forEach((payload) => {
+        const current = next[payload.nomor];
+        if (!current || current.client_updated_at !== payload.client_updated_at) {
+            return;
+        }
+
+        next[payload.nomor] = {
+            ...current,
+            sync_status: 'failed',
+            retry_count: Number(current.retry_count || 0) + 1,
+        };
+    });
+
+    pendingAnswers.value = next;
+    persistPendingAnswers();
+};
+
+const simpanJawabanLokal = (soal = currentSoal.value, clientUpdatedAt = new Date().toISOString()) => {
+    if (!soal || !currentNomor.value) return null;
+    const nomor = soal.nomor || currentNomor.value;
+    const payload = buildPendingPayload({ ...soal, nomor }, clientUpdatedAt);
+    const key = legacyAnswerKey(nomor);
     localStorage.setItem(key, JSON.stringify({
-        jawaban_siswa: currentSoal.value.jawaban_siswa,
-        ragu: currentSoal.value.ragu,
-        client_updated_at: new Date().toISOString(),
+        jawaban_siswa: soal.jawaban_siswa,
+        ragu: soal.ragu,
+        client_updated_at: payload.client_updated_at,
     }));
-    updateNavigationState(nomor, currentSoal.value.jawaban_siswa, currentSoal.value.ragu);
+
+    pendingAnswers.value = {
+        ...pendingAnswers.value,
+        [nomor]: payload,
+    };
+    persistPendingAnswers();
+    updateNavigationState(nomor, soal.jawaban_siswa, soal.ragu);
+
+    return payload;
 };
 
 const muatJawabanLokal = (nomor) => {
     if (!currentSoal.value) return;
-    const key = `${STORAGE_KEY}_${nomor}`;
+    const pending = pendingAnswers.value[nomor];
+    if (pending) {
+        currentSoal.value.jawaban_siswa = pending.jawaban_siswa;
+        currentSoal.value.ragu = pending.ragu;
+        updateNavigationState(nomor, currentSoal.value.jawaban_siswa, currentSoal.value.ragu);
+        return;
+    }
+
+    const key = legacyAnswerKey(nomor);
     const data = localStorage.getItem(key);
     if (data) {
         try {
@@ -394,6 +497,10 @@ const muatJawabanLokal = (nomor) => {
                     currentSoal.value.ragu = parsed.ragu;
                 }
                 updateNavigationState(nomor, currentSoal.value.jawaban_siswa, currentSoal.value.ragu);
+
+                if (currentSoal.value.jawaban_siswa || currentSoal.value.ragu) {
+                    simpanJawabanLokal(currentSoal.value, parsed.client_updated_at || new Date().toISOString());
+                }
             }
         } catch (e) {
             console.error('Gagal memuat jawaban lokal', e);
@@ -458,14 +565,115 @@ const eksekusiSubmitUjian = () => {
     prosesSubmitKeServer();
 };
 
+const pendingPayloads = () => Object.values(pendingAnswers.value)
+    .filter(item => item && item.soal_hash)
+    .sort((a, b) => Number(a.nomor) - Number(b.nomor));
+
+const syncPendingAnswers = async ({ silent = true } = {}) => {
+    if (syncPromise) return syncPromise;
+
+    const payloads = pendingPayloads();
+    if (payloads.length === 0) return true;
+    if (!navigator.onLine) return false;
+
+    isSyncing.value = true;
+    syncPromise = (async () => {
+        try {
+            const response = await axios.post(`/ujian/sesi/${sessionHash.value}/sync`, {
+                answers: payloads.map(item => ({
+                    soal_hash: item.soal_hash,
+                    opsi_hash: item.opsi_hash,
+                    essay: item.essay,
+                    ragu: item.ragu,
+                    client_updated_at: item.client_updated_at,
+                })),
+                device_fp: deviceFp.value,
+            }, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Device-Fingerprint': deviceFp.value,
+                }
+            });
+
+            if (response.data?.sisa_detik !== undefined && Math.abs(sisaWaktuDetik.value - response.data.sisa_detik) > 5) {
+                sisaWaktuDetik.value = response.data.sisa_detik;
+            }
+
+            payloads.forEach(clearPendingAnswer);
+            return pendingPayloads().length === 0;
+        } catch (e) {
+            if (e.response?.status === 410) {
+                router.push(`/vue/ujian/selesai?session=${sessionHash.value}`);
+                return false;
+            }
+            if (e.response?.status === 423) {
+                forceLoginAgain();
+                return false;
+            }
+
+            markPendingFailed(payloads);
+            if (!silent) {
+                Swal.fire('Sinkronisasi Gagal', 'Masih ada jawaban yang belum tersimpan ke server. Periksa koneksi lalu coba lagi.', 'error');
+            }
+
+            return false;
+        } finally {
+            isSyncing.value = false;
+            syncPromise = null;
+        }
+    })();
+
+    return syncPromise;
+};
+
+const saveCurrentBeforeLeaving = async () => {
+    if (!currentSoal.value) return;
+    const nomor = currentSoal.value.nomor || currentNomor.value;
+
+    if (pendingAnswers.value[nomor]) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+        simpanJawabanLokal(currentSoal.value);
+    }
+
+    if (navigator.onLine) {
+        await syncPendingAnswers({ silent: true });
+    }
+};
+
+const clearLocalExamStorage = () => {
+    for (let i = 1; i <= totalSoal.value; i++) {
+        removeLocalAnswer(i);
+    }
+    if (PENDING_STORAGE_KEY) {
+        localStorage.removeItem(PENDING_STORAGE_KEY);
+    }
+    pendingAnswers.value = {};
+};
+
 const prosesSubmitKeServer = async () => {
     try {
-        await axios.post(`/ujian/sesi/${sessionHash.value}/selesai`, {}, { headers: { 'Accept': 'application/json' } });
-        // Hapus semua localStorage per soal
-        for (let i = 1; i <= totalSoal.value; i++) {
-            localStorage.removeItem(`${STORAGE_KEY}_${i}`);
-            localStorage.removeItem(`_${i}`);
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+
+        if (currentSoal.value) {
+            simpanJawabanLokal(currentSoal.value);
         }
+
+        const synced = await syncPendingAnswers({ silent: false });
+        if (!synced || pendingCount.value > 0) {
+            isSubmitting.value = false;
+            Swal.fire('Belum Tersinkron', 'Masih ada jawaban lokal yang belum terkirim. Sambungkan internet lalu coba selesai ujian lagi.', 'warning');
+            return;
+        }
+
+        await axios.post(`/ujian/sesi/${sessionHash.value}/selesai`, {}, {
+            headers: {
+                'Accept': 'application/json',
+                'X-Device-Fingerprint': deviceFp.value,
+            }
+        });
+        clearLocalExamStorage();
         Swal.fire({
             title: 'Ujian Selesai!',
             text: 'Jawaban Anda telah berhasil tersimpan.',
@@ -486,15 +694,18 @@ const prosesSubmitKeServer = async () => {
     }
 };
 
-const simpanJawabanKeServer = async (soal) => {
-    const nomorSoal = soal.nomor || currentNomor.value;
+const simpanJawabanKeServer = async (soal, pendingPayload = null) => {
+    const payload = pendingPayload || simpanJawabanLokal(soal);
+    if (!payload) return;
+
+    const nomorSoal = payload.nomor || currentNomor.value;
     try {
         const res = await axios.post(`/ujian/sesi/${sessionHash.value}/simpan`, {
-            soal_hash: soal.hash_id,
-            opsi_hash: soal.tipe === 'PG' ? soal.jawaban_siswa : null,
-            essay: soal.tipe === 'ISIAN' ? soal.jawaban_siswa : null,
-            ragu: soal.ragu,
-            client_updated_at: new Date().toISOString(),
+            soal_hash: payload.soal_hash,
+            opsi_hash: payload.opsi_hash,
+            essay: payload.essay,
+            ragu: payload.ragu,
+            client_updated_at: payload.client_updated_at,
             device_fp: deviceFp.value
         }, { 
             headers: { 
@@ -511,7 +722,8 @@ const simpanJawabanKeServer = async (soal) => {
         }
 
         // Update status terjawab di navigasi lokal
-        updateNavigationState(res.data?.nomor || nomorSoal, soal.jawaban_siswa, res.data?.ragu ?? soal.ragu);
+        updateNavigationState(res.data?.nomor || nomorSoal, payload.jawaban_siswa, res.data?.ragu ?? payload.ragu);
+        clearPendingAnswer(payload);
 
     } catch (e) {
         if (e.response?.status === 410) {
@@ -520,6 +732,7 @@ const simpanJawabanKeServer = async (soal) => {
         } else if (e.response?.status === 423) {
             forceLoginAgain();
         } else {
+            markPendingFailed([payload]);
             console.error('Gagal sync ke server', e);
         }
     }
@@ -527,25 +740,30 @@ const simpanJawabanKeServer = async (soal) => {
 
 const nextSoal = async () => {
     if (currentNomor.value < totalSoal.value) {
+        await saveCurrentBeforeLeaving();
         await fetchSoal(currentNomor.value + 1);
     }
 };
 const prevSoal = async () => {
     if (currentNomor.value > 1) {
+        await saveCurrentBeforeLeaving();
         await fetchSoal(currentNomor.value - 1);
     }
 };
 const goToSoal = async (nomor) => {
+    if (Number(nomor) !== Number(currentNomor.value)) {
+        await saveCurrentBeforeLeaving();
+    }
     await fetchSoal(nomor);
 };
 
 const simpanJawaban = (soal) => {
     clearTimeout(debounceTimer);
     isSaving.value = true;
-    simpanJawabanLokal();
+    const payload = simpanJawabanLokal(soal);
     
     debounceTimer = setTimeout(() => { 
-        simpanJawabanKeServer(soal).then(() => {
+        simpanJawabanKeServer({ ...soal }, payload).then(() => {
             isSaving.value = false; 
         });
     }, 1000); 
@@ -556,7 +774,20 @@ const toggleFullscreen = () => {
     else if (document.exitFullscreen) document.exitFullscreen();
 };
 
-const updateOnlineStatus = () => { isOnline.value = navigator.onLine; };
+const updateOnlineStatus = () => {
+    isOnline.value = navigator.onLine;
+    if (isOnline.value) {
+        syncPendingAnswers({ silent: true });
+    }
+};
+
+const handleBeforeUnload = () => {
+    if (!currentSoal.value) return;
+    const nomor = currentSoal.value.nomor || currentNomor.value;
+    if (pendingAnswers.value[nomor]) {
+        simpanJawabanLokal(currentSoal.value);
+    }
+};
 
 onMounted(() => {
     const fpData = generateDeviceFingerprint();
@@ -567,16 +798,21 @@ onMounted(() => {
         return;
     }
     STORAGE_KEY = `exam_answer_${sessionHash.value}`;
+    PENDING_STORAGE_KEY = `${STORAGE_KEY}_pending`;
+    loadPendingAnswers();
     
     fetchExamData();
     window.addEventListener('online', updateOnlineStatus);
     window.addEventListener('offline', updateOnlineStatus);
+    window.addEventListener('beforeunload', handleBeforeUnload);
 });
 
 onUnmounted(() => {
     if (intervalTimer) clearInterval(intervalTimer);
+    clearTimeout(debounceTimer);
     window.removeEventListener('online', updateOnlineStatus);
     window.removeEventListener('offline', updateOnlineStatus);
+    window.removeEventListener('beforeunload', handleBeforeUnload);
 });
 </script>
 

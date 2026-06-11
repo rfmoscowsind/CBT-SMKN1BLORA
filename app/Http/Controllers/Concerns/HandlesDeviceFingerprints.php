@@ -186,7 +186,7 @@ trait HandlesDeviceFingerprints
             'fingerprint_raw' => json_encode($this->deviceRaw($request)),
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
-            'lock_enabled' => $lockEnabled,
+            'lock_enabled' => DB::raw($lockEnabled ? 'true' : 'false'),
             'action' => $action,
             'created_at' => now(),
         ]);
