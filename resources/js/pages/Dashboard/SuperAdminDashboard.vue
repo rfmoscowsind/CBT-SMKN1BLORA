@@ -1,282 +1,172 @@
 <template>
     <div id="wrapper">
-        <div class="sidebar">
-            <div class="sidebar-brand">
-                <img src="https://smkn1blora.sch.id/media_library/images/585485ba3fba364ffb5b5ed38d8c4f33.png" alt="Logo">
-                <div>
-                    <div class="fw-bold fs-6 text-white">SMKN 1 BLORA</div>
-                    <div style="font-size: 0.7rem; color: #94a3b8;">CBT Enterprise Server</div>
-                </div>
-            </div>
-            
-            <div class="sidebar-nav">
-                <div class="px-4 text-uppercase fw-bold mb-2 mt-2" style="font-size: 0.7rem; color: #475569;">Menu Utama</div>
-                <router-link to="/vue/dashboard/superadmin" class="nav-item-custom active"><i class="fa-solid fa-chart-pie"></i> Dashboard</router-link>
-                <router-link to="/vue/monitoring/radar" class="nav-item-custom"><i class="fa-solid fa-tower-broadcast"></i> Radar Real-Time</router-link>
-                
-                <div class="px-4 text-uppercase fw-bold mb-2 mt-4" style="font-size: 0.7rem; color: #475569;">Master & Akses</div>
-                <router-link to="/vue/management/staff" class="nav-item-custom"><i class="fa-solid fa-users-gear"></i> Manajemen Staf</router-link>
-                <router-link to="/vue/management/master" class="nav-item-custom"><i class="fa-solid fa-school"></i> Master Sekolah</router-link>
-                
-                <div class="px-4 text-uppercase fw-bold mb-2 mt-4" style="font-size: 0.7rem; color: #475569;">Manajemen Ujian</div>
-                <router-link to="/vue/management/siswa" class="nav-item-custom"><i class="fa-solid fa-users-viewfinder"></i> Manajemen Siswa</router-link>
-                <router-link to="/vue/management/soal" class="nav-item-custom"><i class="fa-solid fa-file-circle-check"></i> Bank Soal</router-link>
-                <router-link to="/vue/management/jadwal" class="nav-item-custom"><i class="fa-solid fa-calendar-days"></i> Jadwal Ujian</router-link>
-                <router-link to="/vue/management/hasil" class="nav-item-custom"><i class="fa-solid fa-square-poll-vertical"></i> Hasil Ujian</router-link>
-                <router-link to="/vue/management/download-hasil" class="nav-item-custom"><i class="fa-solid fa-file-pdf"></i> Download Hasil</router-link>
-                <router-link to="/vue/management/fingerprints" class="nav-item-custom"><i class="fa-solid fa-fingerprint"></i> Kunci Perangkat</router-link>
-            </div>
-            
-            <div class="p-3 border-top" style="border-color: #1e293b !important;">
-                <div class="d-flex align-items-center">
-                    <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center text-white me-2" style="width: 35px; height: 35px;">
-                        <i class="fa-solid fa-user-shield"></i>
-                    </div>
-                    <div class="small">
-                        <div class="text-white fw-bold">{{ currentUser.name }}</div>
-                        <div style="font-size: 0.7rem; color: #94a3b8;">{{ currentUser.role }} Role</div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <AdminSidebar />
 
-        <div class="main-content bg-light">
-            
-            <div class="top-navbar">
-                <div class="d-flex align-items-center">
-                    <h5 class="mb-0 fw-bold text-dark me-3">System Overview</h5>
-                    <span class="badge bg-primary rounded-pill bg-opacity-10 text-primary border border-primary px-3">
-                        <i class="fa-solid fa-network-wired me-1"></i> Mode: Baremetal P2P
+        <main class="main-content">
+            <header class="top-navbar">
+                <div>
+                    <h5 class="mb-1 fw-bold text-dark">Dashboard SuperAdmin</h5>
+                    <div class="text-muted small">Update terakhir: {{ stats.updated_at || '-' }}</div>
+                </div>
+                <div class="top-actions">
+                    <span class="health-badge" :class="overviewHealthy ? 'healthy' : 'attention'">
+                        <i class="fa-solid fa-circle"></i>
+                        {{ overviewHealthy ? 'Sistem normal' : 'Perlu dicek' }}
                     </span>
-                </div>
-                <div>
-                    <button class="btn btn-light border rounded-circle me-2 position-relative">
-                        <i class="fa-regular fa-bell"></i>
-                        <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle"></span>
-                    </button>
                     <button class="btn btn-outline-danger btn-sm px-3" @click="logout">
-                        <i class="fa-solid fa-power-off me-1"></i> Logout
+                        <i class="fa-solid fa-power-off me-1"></i> Keluar
                     </button>
                 </div>
-            </div>
+            </header>
 
-            <div class="container-fluid p-4">
-                
-                <div class="row g-4 mb-4">
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="stat-card">
-                            <div class="stat-icon icon-blue"><i class="fa-solid fa-users"></i></div>
-                            <div>
-                                <div class="text-muted small fw-semibold text-uppercase">Total Siswa Aktif</div>
-                                <div class="fs-4 fw-bold text-dark">{{ stats.total_siswa }}</div>
-                            </div>
-                        </div>
+            <div class="dashboard-shell">
+                <section class="overview-band">
+                    <div class="overview-copy">
+                        <span class="eyebrow">CBT Enterprise Server</span>
+                        <h2>Ringkasan operasional ujian</h2>
+                        <p>{{ currentUser.name }} - {{ currentUser.role }}</p>
                     </div>
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="stat-card">
-                            <div class="stat-icon icon-green"><i class="fa-solid fa-laptop-file"></i></div>
-                            <div>
-                                <div class="text-muted small fw-semibold text-uppercase">Ujian Berlangsung</div>
-                                <div class="fs-4 fw-bold text-dark">{{ stats.ujian_berlangsung }}</div>
-                            </div>
+                    <div class="overview-status">
+                        <div>
+                            <span>Status Infrastruktur</span>
+                            <strong>{{ overviewHealthy ? 'Online' : 'Perlu pengecekan' }}</strong>
                         </div>
+                        <router-link to="/vue/monitoring/radar" class="btn btn-primary">
+                            <i class="fa-solid fa-tower-broadcast me-1"></i> Radar
+                        </router-link>
                     </div>
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="stat-card">
-                            <div class="stat-icon icon-purple"><i class="fa-solid fa-user-check"></i></div>
-                            <div>
-                                <div class="text-muted small fw-semibold text-uppercase">Sesi Aktif Ujian</div>
-                                <div class="fs-4 fw-bold text-dark">{{ stats.peserta_aktif }}</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="stat-card">
-                            <div class="stat-icon icon-green"><i class="fa-solid fa-circle-check"></i></div>
-                            <div>
-                                <div class="text-muted small fw-semibold text-uppercase">Siswa Selesai</div>
-                                <div class="fs-4 fw-bold text-dark">{{ stats.siswa_selesai }}</div>
-                                <div class="text-muted small">Sesi ujian selesai</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                </section>
 
-                <div class="row g-4 mb-4">
-                    <div class="col-12">
-                        <div class="section-header">
+                <section class="stat-grid">
+                    <div v-for="card in statCards" :key="card.label" class="stat-card" :class="card.tone">
+                        <div class="stat-icon"><i :class="card.icon"></i></div>
+                        <div>
+                            <span>{{ card.label }}</span>
+                            <strong>{{ card.value }}</strong>
+                            <small>{{ card.note }}</small>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="dashboard-grid">
+                    <div class="panel panel-main">
+                        <div class="panel-header">
                             <div>
-                                <h6 class="fw-bold mb-1">Server Overview</h6>
-                                <small class="text-muted">Status diperbarui otomatis setiap 30 detik.</small>
+                                <h6>Infrastruktur</h6>
+                                <small>Server, database, Redis, dan pool koneksi.</small>
                             </div>
-                            <span class="badge rounded-pill px-3 py-2" :class="overviewHealthy ? 'bg-success-subtle text-success border border-success' : 'bg-danger-subtle text-danger border border-danger'">
-                                <i class="fa-solid fa-circle me-1" style="font-size: 0.5rem;"></i>
-                                {{ overviewHealthy ? 'Normal' : 'Perlu dicek' }}
-                            </span>
+                            <button class="btn btn-sm btn-light border" @click="fetchStats">
+                                <i class="fa-solid fa-rotate me-1"></i> Refresh
+                            </button>
+                        </div>
+
+                        <div class="health-grid">
+                            <article v-for="item in healthCards" :key="item.key" class="health-card">
+                                <div class="health-head">
+                                    <div>
+                                        <h6>{{ item.title }}</h6>
+                                        <span>{{ item.subtitle }}</span>
+                                    </div>
+                                    <span class="status-pill" :class="statusClass(item.status)">{{ statusText(item.status) }}</span>
+                                </div>
+
+                                <div v-if="item.type === 'server'" class="server-metrics">
+                                    <div>
+                                        <span>Load 1m</span>
+                                        <strong>{{ overview.main_server.load.one }}</strong>
+                                    </div>
+                                    <div>
+                                        <span>Load 5m</span>
+                                        <strong>{{ overview.main_server.load.five }}</strong>
+                                    </div>
+                                    <div>
+                                        <span>Load 15m</span>
+                                        <strong>{{ overview.main_server.load.fifteen }}</strong>
+                                    </div>
+                                </div>
+
+                                <div v-if="item.type === 'server'" class="resource-stack">
+                                    <div class="resource-row">
+                                        <div>
+                                            <span>Memory</span>
+                                            <strong>{{ sizeText(overview.main_server.memory.used_mb, 'MB') }} / {{ sizeText(overview.main_server.memory.total_mb, 'MB') }}</strong>
+                                        </div>
+                                        <em>{{ percentText(overview.main_server.memory.percent) }}</em>
+                                        <div class="progress"><div class="progress-bar memory" :style="{ width: percentWidth(overview.main_server.memory.percent) }"></div></div>
+                                    </div>
+                                    <div class="resource-row">
+                                        <div>
+                                            <span>Disk</span>
+                                            <strong>{{ sizeText(overview.main_server.disk.used_gb, 'GB') }} / {{ sizeText(overview.main_server.disk.total_gb, 'GB') }}</strong>
+                                        </div>
+                                        <em>{{ percentText(overview.main_server.disk.percent) }}</em>
+                                        <div class="progress"><div class="progress-bar disk" :style="{ width: percentWidth(overview.main_server.disk.percent) }"></div></div>
+                                    </div>
+                                </div>
+
+                                <div v-else class="meta-grid">
+                                    <div v-for="meta in item.meta" :key="meta.label">
+                                        <span>{{ meta.label }}</span>
+                                        <strong>{{ meta.value }}</strong>
+                                    </div>
+                                </div>
+
+                                <div class="health-foot" :title="item.footer">{{ item.footer }}</div>
+                            </article>
                         </div>
                     </div>
-                    <div class="col-12 col-xl-4">
-                        <div class="overview-card">
-                            <div class="overview-card-header">
+
+                    <aside class="side-stack">
+                        <div class="panel">
+                            <div class="panel-header compact">
                                 <div>
-                                    <div class="overview-title">{{ overview.main_server.name }}</div>
-                                    <div class="overview-host">{{ overview.main_server.host }}</div>
-                                </div>
-                                <span class="status-pill" :class="statusClass(overview.main_server.status)">{{ statusText(overview.main_server.status) }}</span>
-                            </div>
-                            <div class="metric-grid">
-                                <div>
-                                    <div class="metric-label">Load 1m</div>
-                                    <div class="metric-value">{{ overview.main_server.load.one }}</div>
-                                </div>
-                                <div>
-                                    <div class="metric-label">Load 5m</div>
-                                    <div class="metric-value">{{ overview.main_server.load.five }}</div>
-                                </div>
-                                <div>
-                                    <div class="metric-label">Load 15m</div>
-                                    <div class="metric-value">{{ overview.main_server.load.fifteen }}</div>
+                                    <h6>Aksi Cepat</h6>
+                                    <small>Shortcut SuperAdmin.</small>
                                 </div>
                             </div>
-                            <div class="progress-row">
-                                <div class="d-flex justify-content-between small mb-1">
-                                    <span>Memory</span><span>{{ percentText(overview.main_server.memory.percent) }}</span>
-                                </div>
-                                <div class="progress"><div class="progress-bar bg-primary" :style="{ width: percentWidth(overview.main_server.memory.percent) }"></div></div>
-                                <div class="overview-foot">{{ sizeText(overview.main_server.memory.used_mb, 'MB') }} / {{ sizeText(overview.main_server.memory.total_mb, 'MB') }}</div>
-                            </div>
-                            <div class="progress-row mb-0">
-                                <div class="d-flex justify-content-between small mb-1">
-                                    <span>Disk</span><span>{{ percentText(overview.main_server.disk.percent) }}</span>
-                                </div>
-                                <div class="progress"><div class="progress-bar bg-info" :style="{ width: percentWidth(overview.main_server.disk.percent) }"></div></div>
-                                <div class="overview-foot">{{ sizeText(overview.main_server.disk.used_gb, 'GB') }} / {{ sizeText(overview.main_server.disk.total_gb, 'GB') }}</div>
+                            <div class="quick-list">
+                                <router-link v-for="link in quickLinks" :key="link.to" :to="link.to" class="quick-link">
+                                    <i :class="link.icon"></i>
+                                    <span>{{ link.label }}</span>
+                                    <i class="fa-solid fa-chevron-right"></i>
+                                </router-link>
                             </div>
                         </div>
-                    </div>
-                    <div class="col-12 col-xl-4">
-                        <div class="overview-card">
-                            <div class="overview-card-header">
+
+                        <div class="panel">
+                            <div class="panel-header compact">
                                 <div>
-                                    <div class="overview-title">{{ overview.primary_db.name }}</div>
-                                    <div class="overview-host">{{ overview.primary_db.host }}:{{ overview.primary_db.port }}</div>
+                                    <h6>Redis Keyspace</h6>
+                                    <small>{{ overview.redis_primary.name }}</small>
                                 </div>
-                                <span class="status-pill" :class="statusClass(overview.primary_db.status)">{{ statusText(overview.primary_db.status) }}</span>
                             </div>
-                            <div class="db-meta">
-                                <div><span>Database</span><strong>{{ overview.primary_db.database }}</strong></div>
-                                <div><span>Role</span><strong>{{ overview.primary_db.role }}</strong></div>
-                                <div><span>Latency</span><strong>{{ latencyText(overview.primary_db.latency_ms) }}</strong></div>
-                                <div><span>DB Size</span><strong>{{ overview.primary_db.size }}</strong></div>
-                                <div><span>Connections</span><strong>{{ overview.primary_db.connections ?? '-' }}</strong></div>
-                            </div>
-                            <div class="overview-foot mt-3">DB Time: {{ overview.primary_db.db_time || '-' }}</div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-xl-4">
-                        <div class="overview-card">
-                            <div class="overview-card-header">
-                                <div>
-                                    <div class="overview-title">{{ overview.secondary_db.name }}</div>
-                                    <div class="overview-host">{{ overview.secondary_db.host }}:{{ overview.secondary_db.port }}</div>
-                                </div>
-                                <span class="status-pill" :class="statusClass(overview.secondary_db.status)">{{ statusText(overview.secondary_db.status) }}</span>
-                            </div>
-                            <div class="db-meta">
-                                <div><span>Database</span><strong>{{ overview.secondary_db.database }}</strong></div>
-                                <div><span>Role</span><strong>{{ overview.secondary_db.role }}</strong></div>
-                                <div><span>Latency</span><strong>{{ latencyText(overview.secondary_db.latency_ms) }}</strong></div>
-                                <div><span>DB Size</span><strong>{{ overview.secondary_db.size }}</strong></div>
-                                <div><span>Connections</span><strong>{{ overview.secondary_db.connections ?? '-' }}</strong></div>
-                            </div>
-                            <div class="overview-foot mt-3 text-truncate" :title="overview.secondary_db.message">Info: {{ overview.secondary_db.message || '-' }}</div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-xl-6">
-                        <div class="overview-card">
-                            <div class="overview-card-header">
-                                <div>
-                                    <div class="overview-title">{{ overview.redis_primary.name }}</div>
-                                    <div class="overview-host">{{ overview.redis_primary.host }}:{{ overview.redis_primary.port }}</div>
-                                </div>
-                                <span class="status-pill" :class="statusClass(overview.redis_primary.status)">{{ statusText(overview.redis_primary.status) }}</span>
-                            </div>
-                            <div class="db-meta">
-                                <div><span>Memory</span><strong>{{ overview.redis_primary.memory.used }}</strong></div>
-                                <div><span>Peak</span><strong>{{ overview.redis_primary.memory.peak }}</strong></div>
-                                <div><span>QPS</span><strong>{{ qpsText(overview.redis_primary.qps) }}</strong></div>
-                                <div><span>Clients</span><strong>{{ overview.redis_primary.clients ?? '-' }}</strong></div>
-                                <div><span>Hit Rate</span><strong>{{ percentText(overview.redis_primary.hit_rate) }}</strong></div>
-                                <div><span>Uptime</span><strong>{{ overview.redis_primary.uptime_days ?? '-' }} hari</strong></div>
-                            </div>
-                            <div class="redis-keyspace mt-3" v-if="overview.redis_primary.keyspace.length">
-                                <div class="metric-label mb-2">Keyspace</div>
-                                <div class="keyspace-row" v-for="db in overview.redis_primary.keyspace" :key="db.db">
-                                    <span>{{ db.db }}</span>
-                                    <strong>{{ db.keys }} keys</strong>
+                            <div v-if="overview.redis_primary.keyspace.length" class="keyspace-list">
+                                <div v-for="db in overview.redis_primary.keyspace" :key="db.db" class="keyspace-row">
+                                    <strong>{{ db.db }}</strong>
+                                    <span>{{ db.keys }} keys</span>
                                     <small>{{ db.expires }} exp</small>
                                 </div>
                             </div>
-                            <div class="overview-foot mt-3">Frag: {{ overview.redis_primary.memory.fragmentation ?? '-' }} | Max: {{ overview.redis_primary.memory.max }}</div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-xl-6">
-                        <div class="overview-card">
-                            <div class="overview-card-header">
-                                <div>
-                                    <div class="overview-title">{{ overview.pgbouncer.name }}</div>
-                                    <div class="overview-host">{{ overview.pgbouncer.host }}:{{ overview.pgbouncer.port }}</div>
-                                </div>
-                                <span class="status-pill" :class="statusClass(overview.pgbouncer.status)">{{ statusText(overview.pgbouncer.status) }}</span>
-                            </div>
-                            <div class="db-meta">
-                                <div><span>Database</span><strong>{{ overview.pgbouncer.database }}</strong></div>
-                                <div><span>Pool Mode</span><strong>{{ overview.pgbouncer.pool_mode }}</strong></div>
-                                <div><span>Client Aktif</span><strong>{{ overview.pgbouncer.clients_active ?? '-' }}</strong></div>
-                                <div><span>Client Tunggu</span><strong>{{ overview.pgbouncer.clients_waiting ?? '-' }}</strong></div>
-                                <div><span>Server Aktif</span><strong>{{ overview.pgbouncer.servers_active ?? '-' }}</strong></div>
-                                <div><span>Server Idle</span><strong>{{ overview.pgbouncer.servers_idle ?? '-' }}</strong></div>
-                                <div><span>Avg Query</span><strong>{{ latencyText(overview.pgbouncer.avg_query_ms) }}</strong></div>
-                                <div><span>Avg Wait</span><strong>{{ latencyText(overview.pgbouncer.avg_wait_ms) }}</strong></div>
-                            </div>
-                            <div class="overview-foot mt-3 text-truncate" :title="overview.pgbouncer.message">
-                                {{ overview.pgbouncer.version || '-' }} | Query: {{ overview.pgbouncer.total_queries ?? '-' }} | Xact: {{ overview.pgbouncer.total_xacts ?? '-' }}
+                            <div v-else class="empty-state">
+                                <i class="fa-solid fa-database"></i>
+                                <span>Belum ada keyspace terbaca.</span>
                             </div>
                         </div>
-                    </div>
-                    <div class="col-12 text-end">
-                        <small class="text-muted">Update terakhir: {{ stats.updated_at || '-' }}</small>
-                    </div>
-                </div>
 
-                <div class="row">
-                    <div class="col-12">
-                        <div class="card border-0 shadow-sm rounded-4 overflow-hidden mb-4" style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white;">
-                            <div class="card-body p-4 p-lg-5">
-                                <div class="row align-items-center">
-                                    <div class="col-lg-8 mb-3 mb-lg-0">
-                                        <span class="badge bg-white bg-opacity-20 text-white rounded-pill px-3 py-2 mb-3">
-                                            <i class="fa-solid fa-tower-broadcast me-1"></i> Dedicated Live Feed
-                                        </span>
-                                        <h3 class="fw-bold mb-2">Radar Nilai Real-Time</h3>
-                                        <p class="text-white text-opacity-80 mb-0">
-                                            Kini dipindahkan ke halaman khusus untuk kenyamanan pemantauan yang lebih maksimal. 
-                                            Pantau progres pengerjaan, live score, dan kelola sesi ujian siswa secara real-time.
-                                        </p>
-                                    </div>
-                                    <div class="col-lg-4 text-lg-end">
-                                        <router-link to="/vue/monitoring/radar" class="btn btn-light text-primary fw-bold px-4 py-3 rounded-3 shadow">
-                                            <i class="fa-solid fa-eye me-1"></i> Buka Radar Real-Time
-                                        </router-link>
-                                    </div>
-                                </div>
+                        <div class="radar-panel">
+                            <div>
+                                <span>Live Monitoring</span>
+                                <h6>Radar Nilai Real-Time</h6>
+                                <p>Pantau progres pengerjaan, skor berjalan, dan sesi siswa aktif.</p>
                             </div>
+                            <router-link to="/vue/monitoring/radar" class="btn btn-light fw-bold">
+                                <i class="fa-solid fa-eye me-1"></i> Buka Radar
+                            </router-link>
                         </div>
-                    </div>
-                </div>
-
+                    </aside>
+                </section>
             </div>
-        </div>
+        </main>
     </div>
 </template>
 
@@ -284,6 +174,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
 import Swal from 'sweetalert2';
+import AdminSidebar from '../../components/AdminSidebar.vue';
 
 const stats = ref({
     total_siswa: 0,
@@ -342,6 +233,92 @@ const overview = ref({
 
 let intervalStats = null;
 
+const statCards = computed(() => [
+    { label: 'Siswa Aktif', value: stats.value.total_siswa, note: 'Total akun siswa', icon: 'fa-solid fa-users', tone: 'blue' },
+    { label: 'Ujian Berlangsung', value: stats.value.ujian_berlangsung, note: 'Jadwal aktif', icon: 'fa-solid fa-laptop-file', tone: 'green' },
+    { label: 'Sesi Aktif', value: stats.value.peserta_aktif, note: 'Peserta sedang ujian', icon: 'fa-solid fa-user-check', tone: 'teal' },
+    { label: 'Selesai', value: stats.value.siswa_selesai, note: 'Sesi selesai', icon: 'fa-solid fa-circle-check', tone: 'amber' },
+]);
+
+const healthCards = computed(() => [
+    {
+        key: 'server',
+        type: 'server',
+        title: overview.value.main_server.name,
+        subtitle: overview.value.main_server.host,
+        status: overview.value.main_server.status,
+        footer: `Load: ${overview.value.main_server.load.one} / ${overview.value.main_server.load.five} / ${overview.value.main_server.load.fifteen}`,
+    },
+    {
+        key: 'primary-db',
+        title: overview.value.primary_db.name,
+        subtitle: `${overview.value.primary_db.host}:${overview.value.primary_db.port}`,
+        status: overview.value.primary_db.status,
+        meta: [
+            { label: 'Database', value: overview.value.primary_db.database },
+            { label: 'Role', value: overview.value.primary_db.role },
+            { label: 'Latency', value: latencyText(overview.value.primary_db.latency_ms) },
+            { label: 'Size', value: overview.value.primary_db.size },
+            { label: 'Conn', value: overview.value.primary_db.connections ?? '-' },
+            { label: 'Time', value: overview.value.primary_db.db_time || '-' },
+        ],
+        footer: overview.value.primary_db.message || '-',
+    },
+    {
+        key: 'secondary-db',
+        title: overview.value.secondary_db.name,
+        subtitle: `${overview.value.secondary_db.host}:${overview.value.secondary_db.port}`,
+        status: overview.value.secondary_db.status,
+        meta: [
+            { label: 'Database', value: overview.value.secondary_db.database },
+            { label: 'Role', value: overview.value.secondary_db.role },
+            { label: 'Latency', value: latencyText(overview.value.secondary_db.latency_ms) },
+            { label: 'Size', value: overview.value.secondary_db.size },
+            { label: 'Conn', value: overview.value.secondary_db.connections ?? '-' },
+            { label: 'Time', value: overview.value.secondary_db.db_time || '-' },
+        ],
+        footer: overview.value.secondary_db.message || '-',
+    },
+    {
+        key: 'redis',
+        title: overview.value.redis_primary.name,
+        subtitle: `${overview.value.redis_primary.host}:${overview.value.redis_primary.port}`,
+        status: overview.value.redis_primary.status,
+        meta: [
+            { label: 'Memory', value: overview.value.redis_primary.memory.used },
+            { label: 'Peak', value: overview.value.redis_primary.memory.peak },
+            { label: 'QPS', value: qpsText(overview.value.redis_primary.qps) },
+            { label: 'Clients', value: overview.value.redis_primary.clients ?? '-' },
+            { label: 'Hit Rate', value: percentText(overview.value.redis_primary.hit_rate) },
+            { label: 'Uptime', value: `${overview.value.redis_primary.uptime_days ?? '-'} hari` },
+        ],
+        footer: `Frag: ${overview.value.redis_primary.memory.fragmentation ?? '-'} | Max: ${overview.value.redis_primary.memory.max}`,
+    },
+    {
+        key: 'pgbouncer',
+        title: overview.value.pgbouncer.name,
+        subtitle: `${overview.value.pgbouncer.host}:${overview.value.pgbouncer.port}`,
+        status: overview.value.pgbouncer.status,
+        meta: [
+            { label: 'Pool', value: overview.value.pgbouncer.pool_mode },
+            { label: 'Client Aktif', value: overview.value.pgbouncer.clients_active ?? '-' },
+            { label: 'Client Tunggu', value: overview.value.pgbouncer.clients_waiting ?? '-' },
+            { label: 'Server Aktif', value: overview.value.pgbouncer.servers_active ?? '-' },
+            { label: 'Avg Query', value: latencyText(overview.value.pgbouncer.avg_query_ms) },
+            { label: 'Avg Wait', value: latencyText(overview.value.pgbouncer.avg_wait_ms) },
+        ],
+        footer: overview.value.pgbouncer.version || overview.value.pgbouncer.message || '-',
+    },
+]);
+
+const quickLinks = [
+    { to: '/vue/management/jadwal', icon: 'fa-solid fa-calendar-days', label: 'Jadwal Ujian' },
+    { to: '/vue/management/soal', icon: 'fa-solid fa-file-circle-check', label: 'Bank Soal' },
+    { to: '/vue/management/hasil', icon: 'fa-solid fa-square-poll-vertical', label: 'Hasil Ujian' },
+    { to: '/vue/management/fingerprints', icon: 'fa-solid fa-fingerprint', label: 'Kunci Perangkat' },
+    { to: '/vue/management/staff', icon: 'fa-solid fa-users-gear', label: 'Manajemen Staf' },
+];
+
 const fetchUser = async () => {
     try {
         const response = await axios.get('/auth/user', { headers: { 'Accept': 'application/json' } });
@@ -391,7 +368,7 @@ const qpsText = value => value === null || value === undefined ? '-' : `${value}
 const logout = () => {
     Swal.fire({
         title: 'Keluar Sistem?',
-        text: "Sesi SuperAdmin Anda akan ditutup.",
+        text: 'Sesi SuperAdmin Anda akan ditutup.',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#d33',
@@ -416,268 +393,443 @@ onUnmounted(() => {
 });
 </script>
 
-
 <style scoped>
 #wrapper {
     display: flex;
     width: 100vw;
     min-height: 100vh;
+    background: #eef2f7;
 }
-.sidebar {
-    width: 280px;
-    background-color: #111827; 
-    color: #f8fafc;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    transition: all 0.3s;
-    z-index: 1030;
-}
-.sidebar-brand {
-    padding: 1.5rem;
-    background-color: #0f172a;
-    display: flex;
-    align-items: center;
-    border-bottom: 1px solid #1e293b;
-}
-.sidebar-brand img { width: 40px; margin-right: 15px; }
-.sidebar-nav { padding: 1rem 0; flex-grow: 1; }
-.nav-item-custom {
-    padding: 0.8rem 1.5rem;
-    color: #94a3b8;
-    display: flex;
-    align-items: center;
-    text-decoration: none;
-    transition: all 0.2s;
-    border-left: 4px solid transparent;
-}
-.nav-item-custom:hover {
-    color: #f8fafc;
-    background-color: #1e293b;
-}
-.nav-item-custom.active {
-    color: #60a5fa;
-    background-color: #1e293b;
-    border-left: 4px solid #3b82f6;
-    font-weight: 600;
-}
-.nav-item-custom i { width: 25px; font-size: 1.1rem; }
 .main-content {
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
+    flex: 1;
     min-width: 0;
     height: 100vh;
     overflow-y: auto;
+    background:
+        linear-gradient(180deg, #f8fafc 0%, #eef2f7 36%, #eef2f7 100%);
 }
 .top-navbar {
-    background-color: #ffffff;
-    height: 70px;
-    padding: 0 2rem;
+    min-height: 72px;
+    padding: 0.9rem 1.5rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+    gap: 1rem;
+    background: rgba(255,255,255,0.92);
+    border-bottom: 1px solid #e2e8f0;
     position: sticky;
     top: 0;
     z-index: 1020;
+    backdrop-filter: blur(12px);
 }
-.stat-card {
-    background: #fff;
-    border: none;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.03);
-    padding: 1.5rem;
+.top-actions {
     display: flex;
     align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.health-badge {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    border: 1px solid;
+}
+.health-badge i { font-size: 0.5rem; }
+.health-badge.healthy { color: #15803d; background: #f0fdf4; border-color: #86efac; }
+.health-badge.attention { color: #b45309; background: #fffbeb; border-color: #fcd34d; }
+.dashboard-shell {
+    padding: 1.5rem;
+}
+.overview-band {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: stretch;
+    padding: 1.25rem;
+    border: 1px solid #dbe4ef;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.04);
+}
+.overview-copy {
+    display: grid;
+    gap: 0.25rem;
+}
+.eyebrow {
+    color: #0f766e;
+    font-size: 0.74rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+.overview-copy h2 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 1.55rem;
+    font-weight: 800;
+    letter-spacing: 0;
+}
+.overview-copy p {
+    margin: 0;
+    color: #64748b;
+}
+.overview-status {
+    min-width: 270px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.9rem;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+.overview-status span {
+    display: block;
+    color: #64748b;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.overview-status strong {
+    color: #0f172a;
+}
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 1rem 0;
+}
+.stat-card {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    min-height: 112px;
+    padding: 1rem;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.035);
 }
 .stat-icon {
-    width: 60px;
-    height: 60px;
-    border-radius: 12px;
+    width: 48px;
+    height: 48px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.8rem;
-    margin-right: 1.2rem;
+    border-radius: 8px;
+    font-size: 1.25rem;
+    flex: 0 0 auto;
 }
-.icon-blue { background-color: #eff6ff; color: #3b82f6; }
-.icon-green { background-color: #f0fdf4; color: #22c55e; }
-.icon-purple { background-color: #faf5ff; color: #a855f7; }
-.icon-red { background-color: #fef2f2; color: #ef4444; }
-.section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+.stat-card span, .stat-card small {
+    display: block;
+    color: #64748b;
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.stat-card strong {
+    display: block;
+    color: #0f172a;
+    font-size: 1.7rem;
+    line-height: 1.1;
+    margin: 0.2rem 0;
+}
+.stat-card small {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: none;
+}
+.stat-card.blue .stat-icon { color: #2563eb; background: #dbeafe; }
+.stat-card.green .stat-icon { color: #15803d; background: #dcfce7; }
+.stat-card.teal .stat-icon { color: #0f766e; background: #ccfbf1; }
+.stat-card.amber .stat-icon { color: #b45309; background: #fef3c7; }
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
     gap: 1rem;
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.03);
-    padding: 1rem 1.25rem;
+    align-items: start;
 }
-.overview-card {
+.panel {
+    border-radius: 8px;
     background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.03);
-    padding: 1.25rem;
-    min-height: 100%;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.035);
 }
-.overview-card-header {
+.panel-main {
+    padding: 1rem;
+}
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.panel-header.compact {
+    padding: 1rem 1rem 0;
+    margin-bottom: 0.75rem;
+}
+.panel-header h6 {
+    margin: 0;
+    color: #0f172a;
+    font-weight: 800;
+}
+.panel-header small {
+    color: #64748b;
+}
+.health-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+.health-card {
+    min-width: 0;
+    padding: 1rem;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    background: #fbfdff;
+}
+.health-card:first-child {
+    grid-column: 1 / -1;
+}
+.health-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1.25rem;
+    gap: 0.75rem;
+    margin-bottom: 0.9rem;
 }
-.overview-title {
-    font-weight: 700;
+.health-head h6 {
+    margin: 0;
     color: #0f172a;
+    font-weight: 800;
 }
-.overview-host {
+.health-head span {
     color: #64748b;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
 }
 .status-pill {
-    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0.25rem 0.6rem;
+    border-radius: 8px;
     font-size: 0.72rem;
-    font-weight: 700;
-    padding: 0.35rem 0.75rem;
+    font-weight: 800;
     text-transform: uppercase;
+    border: 1px solid;
 }
-.status-online {
-    background: #dcfce7;
-    color: #15803d;
-    border: 1px solid #86efac;
-}
-.status-offline {
-    background: #fee2e2;
-    color: #b91c1c;
-    border: 1px solid #fca5a5;
-}
-.status-unknown {
-    background: #f1f5f9;
-    color: #475569;
-    border: 1px solid #cbd5e1;
-}
-.metric-grid {
+.status-online { color: #15803d; background: #f0fdf4; border-color: #86efac; }
+.status-offline { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+.status-unknown { color: #475569; background: #f8fafc; border-color: #cbd5e1; }
+.server-metrics {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.75rem;
     margin-bottom: 1rem;
 }
-.metric-grid > div,
-.db-meta > div {
+.server-metrics div,
+.meta-grid div {
+    padding: 0.72rem;
+    border-radius: 8px;
     background: #f8fafc;
     border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 0.75rem;
 }
-.metric-label,
-.db-meta span {
+.server-metrics span,
+.meta-grid span {
     display: block;
     color: #64748b;
-    font-size: 0.72rem;
-    font-weight: 700;
+    font-size: 0.7rem;
+    font-weight: 800;
     text-transform: uppercase;
     margin-bottom: 0.25rem;
 }
-.metric-value,
-.db-meta strong {
+.server-metrics strong,
+.meta-grid strong {
+    display: block;
     color: #0f172a;
-    font-size: 1.1rem;
+    font-size: 1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
-.db-meta {
+.resource-stack {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.75rem;
 }
-.progress-row {
-    margin-bottom: 0.85rem;
+.resource-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    align-items: center;
 }
-.redis-keyspace {
+.resource-row span {
+    display: block;
+    color: #64748b;
+    font-size: 0.76rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+.resource-row strong {
+    color: #0f172a;
+}
+.resource-row em {
+    color: #334155;
+    font-style: normal;
+    font-weight: 800;
+}
+.progress {
+    grid-column: 1 / -1;
+    height: 8px;
+    background: #e2e8f0;
+    border-radius: 999px;
+    overflow: hidden;
+}
+.progress-bar {
+    height: 100%;
+}
+.progress-bar.memory { background: #2563eb; }
+.progress-bar.disk { background: #0f766e; }
+.meta-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+.health-foot {
+    margin-top: 0.8rem;
+    color: #64748b;
+    font-size: 0.8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.side-stack {
+    display: grid;
+    gap: 1rem;
+    position: sticky;
+    top: 88px;
+}
+.quick-list {
+    display: grid;
+    padding: 0 1rem 1rem;
+}
+.quick-link {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr) 14px;
+    align-items: center;
+    gap: 0.65rem;
+    min-height: 44px;
+    color: #334155;
+    text-decoration: none;
     border-top: 1px solid #e2e8f0;
-    padding-top: 0.75rem;
+}
+.quick-link:first-child {
+    border-top: none;
+}
+.quick-link:hover {
+    color: #0f766e;
+}
+.quick-link span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 700;
+}
+.keyspace-list {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0 1rem 1rem;
 }
 .keyspace-row {
     display: grid;
-    grid-template-columns: 0.8fr 1fr 0.8fr;
+    grid-template-columns: 0.7fr 1fr 0.8fr;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.35rem 0;
-    color: #475569;
-    font-size: 0.82rem;
+    padding: 0.65rem;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
 }
-.keyspace-row strong {
-    color: #0f172a;
-}
-.keyspace-row small {
-    text-align: right;
-}
-.progress {
-    height: 8px;
-    background: #e2e8f0;
-}
-.overview-foot {
-    margin-top: 0.4rem;
-    color: #64748b;
-    font-size: 0.82rem;
-}
-.bg-success-subtle { background-color: #dcfce7 !important; }
-.bg-danger-subtle { background-color: #fee2e2 !important; }
-.table-card {
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.03);
-    border: none;
-}
-.table-custom thead th {
-    background-color: #f8fafc;
-    color: #475569;
-    font-weight: 600;
-    border-bottom: 2px solid #e2e8f0;
-    padding: 1rem;
-}
-.table-custom tbody td {
-    padding: 1rem;
-    vertical-align: middle;
-    color: #334155;
-    border-bottom: 1px solid #f1f5f9;
-}
-.live-badge {
-    background-color: #fee2e2;
-    color: #dc2626;
-    padding: 0.3rem 0.8rem;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    display: inline-flex;
+.keyspace-row strong { color: #0f172a; }
+.keyspace-row span { color: #334155; }
+.keyspace-row small { color: #64748b; text-align: right; }
+.empty-state {
+    display: flex;
     align-items: center;
-    border: 1px solid #fca5a5;
+    gap: 0.65rem;
+    margin: 0 1rem 1rem;
+    padding: 1rem;
+    border: 1px dashed #cbd5e1;
+    border-radius: 8px;
+    color: #64748b;
+    background: #f8fafc;
 }
-.live-dot {
-    width: 8px;
-    height: 8px;
-    background-color: #dc2626;
-    border-radius: 50%;
-    margin-right: 6px;
-    animation: pulse 1.5s infinite;
+.radar-panel {
+    display: grid;
+    gap: 1rem;
+    padding: 1.15rem;
+    border-radius: 8px;
+    background: #0f766e;
+    color: #fff;
+    box-shadow: 0 12px 30px rgba(15, 118, 110, 0.18);
 }
-@keyframes scoreUpdate {
-    0% { background-color: transparent; }
-    50% { background-color: #dcfce7; }
-    100% { background-color: transparent; }
+.radar-panel span {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #ccfbf1;
 }
-.score-updated {
-    animation: scoreUpdate 1.5s ease;
+.radar-panel h6 {
+    margin: 0.15rem 0;
+    font-weight: 800;
 }
-.score-cell {
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: #1e3a8a;
+.radar-panel p {
+    margin: 0;
+    color: #d9fffa;
+    font-size: 0.88rem;
 }
-@keyframes pulse {
-    0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
-    70% { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+@media (max-width: 1200px) {
+    .stat-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+    .side-stack {
+        position: static;
+    }
+}
+@media (max-width: 768px) {
+    #wrapper {
+        display: block;
+    }
+    .main-content {
+        height: auto;
+        min-height: 100vh;
+    }
+    .top-navbar,
+    .overview-band,
+    .overview-status {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .dashboard-shell {
+        padding: 1rem;
+    }
+    .stat-grid,
+    .health-grid,
+    .server-metrics,
+    .meta-grid {
+        grid-template-columns: 1fr;
+    }
+    .health-card:first-child {
+        grid-column: auto;
+    }
 }
 </style>

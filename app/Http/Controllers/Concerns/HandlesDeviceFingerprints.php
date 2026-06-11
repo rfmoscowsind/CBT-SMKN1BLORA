@@ -82,7 +82,7 @@ trait HandlesDeviceFingerprints
         DB::table('users')->where('id', $user->id)->update([
             'device_fingerprint'     => $fingerprint,
             'device_fingerprint_raw' => json_encode($this->deviceRaw($request)),
-            'is_device_locked'       => false,
+            'is_device_locked'       => DB::raw('false'),
             'updated_at'             => now(),
         ]);
     }
@@ -203,7 +203,7 @@ trait HandlesDeviceFingerprints
         DB::table('sesi_ujians')->where('id', $sessionId)->update([
             'device_fingerprint'     => $fingerprint,
             'device_fingerprint_raw' => json_encode($this->deviceRaw($request)),
-            'is_device_locked'       => false,
+            'is_device_locked'       => DB::raw('false'),
             'updated_at'             => now(),
         ]);
     }
@@ -214,7 +214,7 @@ trait HandlesDeviceFingerprints
             DB::table('users')->where('id', $userId)->update([
                 'device_fingerprint'     => null,
                 'device_fingerprint_raw' => null,
-                'is_device_locked'       => false,
+                'is_device_locked'       => DB::raw('false'),
                 'updated_at'             => now(),
             ]);
 
@@ -223,7 +223,7 @@ trait HandlesDeviceFingerprints
             DB::table('sesi_ujians')->where('user_id', $userId)->update([
                 'device_fingerprint'     => null,
                 'device_fingerprint_raw' => null,
-                'is_device_locked'       => false,
+                'is_device_locked'       => DB::raw('false'),
                 'updated_at'             => now(),
             ]);
 
@@ -260,7 +260,7 @@ trait HandlesDeviceFingerprints
     protected function lockDeviceAccessForUser(int $userId, ?int $sessionId = null, string $reason = 'device_lock'): void
     {
         DB::table('users')->where('id', $userId)->update([
-            'is_device_locked' => true,
+            'is_device_locked' => DB::raw('true'),
             'updated_at'       => now(),
         ]);
 
@@ -273,7 +273,7 @@ trait HandlesDeviceFingerprints
 
         $query->update([
             'status'           => 'terkunci',
-            'is_device_locked' => true,
+            'is_device_locked' => DB::raw('true'),
             'updated_at'       => now(),
         ]);
 

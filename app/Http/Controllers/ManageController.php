@@ -597,7 +597,7 @@ class ManageController extends Controller
             DB::table('users')->where('id', $session->user_id)->update([
                 'device_fingerprint' => null,
                 'device_fingerprint_raw' => null,
-                'is_device_locked' => false,
+                'is_device_locked' => DB::raw('false'),
                 'updated_at' => now(),
             ]);
 
@@ -606,7 +606,7 @@ class ManageController extends Controller
                 'waktu_submit' => null,
                 'device_fingerprint' => null,
                 'device_fingerprint_raw' => null,
-                'is_device_locked' => false,
+                'is_device_locked' => DB::raw('false'),
                 'last_seen_at' => null,
                 'updated_at' => now(),
             ]);

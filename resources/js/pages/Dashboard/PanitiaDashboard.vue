@@ -1,204 +1,134 @@
 <template>
     <div id="wrapper">
-        <div class="sidebar">
-            <div class="sidebar-brand">
-                <img src="https://smkn1blora.sch.id/media_library/images/585485ba3fba364ffb5b5ed38d8c4f33.png" alt="Logo">
-                <div>
-                    <div class="fw-bold fs-6 text-white">SMKN 1 BLORA</div>
-                    <div style="font-size: 0.7rem; color: #bfdbfe;">Panel Admin / Panitia</div>
-                </div>
-            </div>
-            
-            <div class="sidebar-nav">
-                <div class="px-4 text-uppercase fw-bold mb-2 mt-2" style="font-size: 0.7rem; color: #93c5fd;">Menu Utama</div>
-                <router-link to="/vue/dashboard/panitia" class="nav-item-custom active"><i class="fa-solid fa-house"></i> Dashboard Overview</router-link>
-                
-                <div class="px-4 text-uppercase fw-bold mb-2 mt-4" style="font-size: 0.7rem; color: #93c5fd;">Operasional</div>
-                <router-link to="/vue/management/master" class="nav-item-custom"><i class="fa-solid fa-school"></i> Master Sekolah</router-link>
-                <router-link to="/vue/management/siswa" class="nav-item-custom"><i class="fa-solid fa-users"></i> Manajemen Siswa</router-link>
-                <router-link to="/vue/management/jadwal" class="nav-item-custom"><i class="fa-solid fa-calendar-check"></i> Manajemen Jadwal</router-link>
-                
-                <div class="px-4 text-uppercase fw-bold mb-2 mt-4" style="font-size: 0.7rem; color: #93c5fd;">Akademik & Hasil</div>
-                <router-link to="/vue/management/soal" class="nav-item-custom"><i class="fa-solid fa-book-open"></i> Bank Soal</router-link>
-                <router-link to="/vue/management/hasil" class="nav-item-custom"><i class="fa-solid fa-file-export"></i> Hasil Ujian</router-link>
-                <router-link to="/vue/management/download-hasil" class="nav-item-custom"><i class="fa-solid fa-file-pdf"></i> Download PDF Hasil</router-link>
-            </div>
-            
-            <div class="p-3 border-top" style="border-color: rgba(255,255,255,0.1) !important;">
-                <a href="#" class="nav-item-custom p-0" @click.prevent="bukaProfil">
-                    <div class="d-flex align-items-center w-100">
-                        <div class="bg-white rounded-circle d-flex align-items-center justify-content-center text-primary me-2" style="width: 35px; height: 35px;">
-                            <i class="fa-solid fa-user-tie"></i>
-                        </div>
-                        <div class="small flex-grow-1">
-                            <div class="text-white fw-bold">{{ currentUser.name }}</div>
-                            <div style="font-size: 0.7rem; color: #bfdbfe;">Lihat Profil</div>
-                        </div>
-                        <i class="fa-solid fa-gear text-white opacity-50" style="width: auto;"></i>
-                    </div>
-                </a>
-            </div>
-        </div>
+        <AdminSidebar />
 
-        <div class="main-content">
-            
-            <div class="top-navbar">
-                <div class="d-flex align-items-center">
-                    <h5 class="mb-0 fw-bold text-dark me-3">Dashboard Panitia</h5>
-                    <span class="text-muted small d-none d-md-block">Tahun Ajaran 2025/2026 Genap</span>
-                </div>
+        <main class="main-content">
+            <header class="top-navbar">
                 <div>
+                    <h5 class="mb-1 fw-bold text-dark">Dashboard Panitia</h5>
+                    <div class="text-muted small">{{ currentUser.name }} - {{ currentUser.role }}</div>
+                </div>
+                <div class="top-actions">
+                    <router-link to="/vue/management/jadwal" class="btn btn-primary btn-sm px-3">
+                        <i class="fa-solid fa-calendar-plus me-1"></i> Jadwal
+                    </router-link>
                     <button class="btn btn-outline-danger btn-sm px-3" @click="logout">
                         <i class="fa-solid fa-power-off me-1"></i> Keluar
                     </button>
                 </div>
-            </div>
+            </header>
 
-            <div class="container-fluid p-4">
-                
-                 <div class="row g-4 mb-4">
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="stat-card primary">
-                            <div class="stat-icon"><i class="fa-solid fa-user-graduate"></i></div>
-                            <div>
-                                <div class="text-muted small fw-semibold text-uppercase">Total Siswa Aktif</div>
-                                <div class="fs-4 fw-bold text-dark">{{ stats.total_siswa }}</div>
-                            </div>
-                        </div>
+            <div class="dashboard-shell">
+                <section class="summary-band">
+                    <div>
+                        <span class="eyebrow">Operasional CBT</span>
+                        <h2>Kontrol ujian hari ini</h2>
+                        <p>Reset sesi, cek jadwal aktif, dan unduh hasil dari satu halaman ringkas.</p>
                     </div>
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="stat-card info">
-                            <div class="stat-icon"><i class="fa-solid fa-calendar-day"></i></div>
-                            <div>
-                                <div class="text-muted small fw-semibold text-uppercase">Jadwal Hari Ini</div>
-                                <div class="fs-4 fw-bold text-dark">{{ stats.ujian_berlangsung }} Sesi</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="stat-card success">
-                            <div class="stat-icon"><i class="fa-solid fa-file-circle-check"></i></div>
-                            <div>
-                                <div class="text-muted small fw-semibold text-uppercase">Bank Soal Tersedia</div>
-                                <div class="fs-4 fw-bold text-dark">{{ stats.total_paket }} Paket</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="stat-card warning">
-                            <div class="stat-icon"><i class="fa-solid fa-triangle-exclamation text-warning"></i></div>
-                            <div>
-                                <div class="text-muted small fw-semibold text-uppercase">Antrean Reset Sesi</div>
-                                <div class="fs-4 fw-bold text-danger">{{ sesiBermasalah.length }} Siswa</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                    <button class="btn btn-light border fw-semibold" @click="fetchDashboardData">
+                        <i class="fa-solid fa-rotate me-1"></i> Refresh
+                    </button>
+                </section>
 
-                <div class="row g-4">
-                    <div class="col-lg-6">
-                        <div class="table-card p-4 h-100">
-                            <div class="d-flex justify-content-between align-items-center mb-4">
-                                <div>
-                                    <h5 class="fw-bold text-dark mb-1"><i class="fa-solid fa-rotate-left text-danger me-2"></i>Butuh Reset Sesi</h5>
-                                    <p class="text-muted small mb-0">Siswa yang terputus / ganti gawai saat ujian berlangsung.</p>
+                <section class="stat-grid">
+                    <div v-for="item in statCards" :key="item.label" class="stat-card" :class="item.tone">
+                        <div class="stat-icon"><i :class="item.icon"></i></div>
+                        <div>
+                            <span>{{ item.label }}</span>
+                            <strong>{{ item.value }}</strong>
+                            <small>{{ item.note }}</small>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="content-grid">
+                    <article class="panel">
+                        <div class="panel-header">
+                            <div>
+                                <h6>Butuh Reset Sesi</h6>
+                                <small>Sesi aktif atau terkunci yang perlu dibantu panitia.</small>
+                            </div>
+                            <span class="count-pill danger">{{ sesiBermasalah.length }}</span>
+                        </div>
+
+                        <div v-if="sesiBermasalah.length === 0" class="empty-state">
+                            <i class="fa-solid fa-circle-check"></i>
+                            <span>Tidak ada sesi bermasalah.</span>
+                        </div>
+                        <div v-else class="list-stack">
+                            <div v-for="siswa in sesiBermasalah.slice(0, 8)" :key="siswa.id" class="data-row">
+                                <div class="row-icon danger"><i class="fa-solid fa-rotate-left"></i></div>
+                                <div class="row-main">
+                                    <strong>{{ siswa.name }}</strong>
+                                    <span>{{ siswa.kelas }} - {{ siswa.mapel }}</span>
                                 </div>
-                            </div>
-
-                            <div class="table-responsive">
-                                <table class="table table-custom mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th>Siswa</th>
-                                            <th>Kelas</th>
-                                            <th class="text-end">Aksi</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr v-if="sesiBermasalah.length === 0">
-                                            <td colspan="3" class="text-center text-muted py-4">Tidak ada laporan sesi bermasalah.</td>
-                                        </tr>
-                                        <tr v-for="siswa in sesiBermasalah" :key="siswa.id">
-                                            <td>
-                                                <div class="fw-semibold text-dark">{{ siswa.name }}</div>
-                                                <div class="small text-muted">{{ siswa.mapel }}</div>
-                                            </td>
-                                            <td>{{ siswa.kelas }}</td>
-                                            <td class="text-end">
-                                                <button class="btn btn-danger btn-action" @click="resetSesi(siswa)">
-                                                    Reset Login
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="mt-3 text-center">
-                                <a href="#" class="text-decoration-none small text-primary fw-semibold">Lihat Semua Data Siswa <i class="fa-solid fa-arrow-right ms-1"></i></a>
+                                <button class="btn btn-sm btn-outline-danger" @click="resetSesi(siswa)">Reset</button>
                             </div>
                         </div>
-                    </div>
+                    </article>
 
-                    <div class="col-lg-6">
-                        <div class="table-card p-4 h-100">
-                            <div class="d-flex justify-content-between align-items-center mb-4">
-                                <div>
-                                    <h5 class="fw-bold text-dark mb-1"><i class="fa-solid fa-file-export text-success me-2"></i>Siap Export</h5>
-                                    <p class="text-muted small mb-0">Jadwal ujian yang telah selesai dan siap diunduh hasilnya.</p>
+                    <article class="panel">
+                        <div class="panel-header">
+                            <div>
+                                <h6>Siap Download</h6>
+                                <small>Ringkasan ujian selesai yang sudah bisa diekspor.</small>
+                            </div>
+                            <router-link to="/vue/management/download-hasil" class="btn btn-sm btn-light border">Buka</router-link>
+                        </div>
+
+                        <div v-if="ujianSelesai.length === 0" class="empty-state">
+                            <i class="fa-solid fa-file-circle-check"></i>
+                            <span>Belum ada hasil siap unduh.</span>
+                        </div>
+                        <div v-else class="list-stack">
+                            <div v-for="hasil in ujianSelesai.slice(0, 8)" :key="hasil.id" class="data-row">
+                                <div class="row-icon success"><i class="fa-solid fa-file-export"></i></div>
+                                <div class="row-main">
+                                    <strong>{{ hasil.mapel }}</strong>
+                                    <span>{{ hasil.tanggal }} - {{ hasil.jumlah_peserta }} siswa</span>
                                 </div>
-                            </div>
-
-                            <div class="table-responsive">
-                                <table class="table table-custom mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th>Mata Pelajaran</th>
-                                            <th>Peserta</th>
-                                            <th class="text-end">Unduh</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr v-for="hasil in ujianSelesai" :key="hasil.id">
-                                            <td>
-                                                <div class="fw-semibold text-dark">{{ hasil.mapel }}</div>
-                                                <div class="small text-muted">{{ hasil.tanggal }}</div>
-                                            </td>
-                                            <td>
-                                                <span class="badge bg-success bg-opacity-10 text-success border border-success">
-                                                    {{ hasil.jumlah_peserta }} Siswa
-                                                </span>
-                                            </td>
-                                            <td class="text-end">
-                                                <div class="dropdown">
-                                                    <button class="btn btn-outline-primary btn-action dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                                                        Export
-                                                    </button>
-                                                    <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0 mt-2">
-                                                        <li><a class="dropdown-item py-2" href="#" @click.prevent="exportData(hasil.id, 'excel')"><i class="fa-solid fa-file-excel text-success me-2"></i> Format Excel (.xlsx)</a></li>
-                                                        <li><a class="dropdown-item py-2" href="#" @click.prevent="exportData(hasil.id, 'pdf')"><i class="fa-solid fa-file-pdf text-danger me-2"></i> Format PDF (.pdf)</a></li>
-                                                    </ul>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="mt-3 text-center">
-                                <a href="#" class="text-decoration-none small text-primary fw-semibold">Buka Menu Export Lengkap <i class="fa-solid fa-arrow-right ms-1"></i></a>
+                                <button class="btn btn-sm btn-outline-primary" @click="exportData(hasil.id, 'pdf')">PDF</button>
                             </div>
                         </div>
-                    </div>
+                    </article>
 
-                </div>
+                    <article class="panel quick-panel">
+                        <div class="panel-header">
+                            <div>
+                                <h6>Aksi Cepat</h6>
+                                <small>Menu yang paling sering dipakai panitia.</small>
+                            </div>
+                        </div>
+                        <div class="quick-grid">
+                            <router-link to="/vue/management/siswa" class="quick-card">
+                                <i class="fa-solid fa-users"></i>
+                                <span>Siswa</span>
+                            </router-link>
+                            <router-link to="/vue/management/jadwal" class="quick-card">
+                                <i class="fa-solid fa-calendar-days"></i>
+                                <span>Jadwal</span>
+                            </router-link>
+                            <router-link to="/vue/management/soal" class="quick-card">
+                                <i class="fa-solid fa-file-circle-check"></i>
+                                <span>Bank Soal</span>
+                            </router-link>
+                            <router-link to="/vue/management/hasil" class="quick-card">
+                                <i class="fa-solid fa-square-poll-vertical"></i>
+                                <span>Hasil</span>
+                            </router-link>
+                        </div>
+                    </article>
+                </section>
             </div>
-        </div>
+        </main>
     </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import Swal from 'sweetalert2';
 import axios from 'axios';
+import AdminSidebar from '../../components/AdminSidebar.vue';
 
 const sesiBermasalah = ref([]);
 const ujianSelesai = ref([]);
@@ -212,12 +142,17 @@ const currentUser = ref({ name: 'Loading...', role: 'Panitia' });
 
 let intervalId = null;
 
+const statCards = computed(() => [
+    { label: 'Siswa Aktif', value: stats.value.total_siswa, note: 'Akun siswa', icon: 'fa-solid fa-user-graduate', tone: 'blue' },
+    { label: 'Jadwal Aktif', value: stats.value.ujian_berlangsung, note: 'Sesi hari ini', icon: 'fa-solid fa-calendar-day', tone: 'green' },
+    { label: 'Paket Soal', value: stats.value.total_paket || 0, note: 'Bank siap pakai', icon: 'fa-solid fa-file-circle-check', tone: 'teal' },
+    { label: 'Reset Sesi', value: sesiBermasalah.value.length, note: 'Perlu perhatian', icon: 'fa-solid fa-triangle-exclamation', tone: 'amber' },
+]);
+
 const fetchUser = async () => {
     try {
         const response = await axios.get('/auth/user', { headers: { 'Accept': 'application/json' } });
-        if (response.data) {
-            currentUser.value = response.data;
-        }
+        if (response.data) currentUser.value = response.data;
     } catch (e) {
         console.error('Gagal mengambil data user', e);
     }
@@ -225,35 +160,22 @@ const fetchUser = async () => {
 
 const fetchDashboardData = async () => {
     try {
-        // Fetch stats
         const resStats = await axios.get('/monitoring/stats', { headers: { 'Accept': 'application/json' } });
-        if (resStats.data) {
-            stats.value = resStats.data;
-        }
+        if (resStats.data) stats.value = resStats.data;
 
-        // Fetch sessions
         const resSessions = await axios.get('/monitoring/sessions', { headers: { 'Accept': 'application/json' } });
         if (resSessions.data && Array.isArray(resSessions.data)) {
-            // Sesi aktif/terkunci yang bisa di-reset tanpa menghapus jawaban.
             sesiBermasalah.value = resSessions.data.filter(s => ['aktif', 'terkunci'].includes(s.status));
-
-            // Ujian selesai (siap export)
             const finished = resSessions.data.filter(s => s.status === 'selesai');
             const uniqueFinished = [];
             const seenMapel = new Set();
             finished.forEach(s => {
                 if (!seenMapel.has(s.mapel)) {
                     seenMapel.add(s.mapel);
-                    
-                    let formattedDate = '-';
-                    if (s.waktu_submit) {
-                        formattedDate = new Date(s.waktu_submit).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-                    }
-
                     uniqueFinished.push({
                         id: s.jadwal_ujian_id,
                         mapel: s.mapel,
-                        tanggal: formattedDate,
+                        tanggal: s.waktu_submit ? new Date(s.waktu_submit).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-',
                         jumlah_peserta: finished.filter(f => f.mapel === s.mapel).length
                     });
                 }
@@ -268,23 +190,19 @@ const fetchDashboardData = async () => {
 const resetSesi = (siswa) => {
     Swal.fire({
         title: 'Reset Sesi Ujian?',
-        html: `Anda akan mereset status login ujian atas nama <br><b>${siswa.name} (${siswa.kelas})</b>. <br><br>Jawaban sebelumnya tetap aman.`,
+        html: `Reset sesi <b>${siswa.name} (${siswa.kelas})</b>. Jawaban sebelumnya tetap aman.`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#dc3545',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: 'Ya, Reset Sekarang',
+        confirmButtonText: 'Reset Sekarang',
         cancelButtonText: 'Batal'
     }).then(async (result) => {
         if (result.isConfirmed) {
             try {
                 const response = await axios.post(`/kelola/sesi/${siswa.id}/reset`, {}, { headers: { 'Accept': 'application/json' } });
                 if (response.data && response.data.success) {
-                    Swal.fire(
-                        'Berhasil di-Reset!',
-                        'Siswa kini dapat login kembali dari gawainya.',
-                        'success'
-                    );
+                    Swal.fire('Berhasil', 'Siswa kini dapat login kembali.', 'success');
                     fetchDashboardData();
                 }
             } catch (e) {
@@ -295,47 +213,12 @@ const resetSesi = (siswa) => {
 };
 
 const exportData = (jadwal_id, tipe) => {
-    // FIXED: Tidak lagi menggunakan mock setTimeout.
-    // Redirect ke endpoint download nyata /kelola/laporan/{id}/{format}
     if (!jadwal_id) {
-        Swal.fire({
-            icon: 'info',
-            title: 'Export Hasil Ujian',
-            html: 'Untuk download hasil ujian, gunakan menu <b>Download Hasil</b> di sidebar.<br><br>Di sana Anda bisa preview dan download PDF hasil ujian per kelas.',
-            confirmButtonColor: '#1e3a8a',
-            confirmButtonText: 'Buka Halaman Download'
-        }).then(result => {
-            if (result.isConfirmed) {
-                window.location.href = '/vue/management/download-hasil';
-            }
-        });
+        window.location.href = '/vue/management/download-hasil';
         return;
     }
     const format = tipe === 'excel' ? 'xlsx' : 'pdf';
-    Swal.fire({
-        title: 'Menyiapkan Laporan',
-        text: `File ${format.toUpperCase()} sedang di-generate...`,
-        allowOutsideClick: false,
-        didOpen: () => { Swal.showLoading(); }
-    });
     window.location.href = `/kelola/laporan/${jadwal_id}/${format}`;
-    // Tutup Swal setelah browser mulai download (redirect akan close window)
-    setTimeout(() => { if (Swal.isVisible()) Swal.close(); }, 2000);
-};
-
-const bukaProfil = () => {
-    Swal.fire({
-        title: 'Profil Pengguna',
-        html: `
-            <div class="text-start mt-3">
-                <p><b>Nama:</b> ${currentUser.value.name}</p>
-                <p><b>Jabatan:</b> ${currentUser.value.role} Ujian / Tata Usaha</p>
-                <p><b>Hak Akses:</b> Mengelola Jadwal, Siswa, dan Laporan Hasil.</p>
-            </div>
-        `,
-        icon: 'info',
-        confirmButtonColor: '#1e3a8a'
-    });
 };
 
 const logout = () => {
@@ -348,16 +231,14 @@ const logout = () => {
         confirmButtonText: 'Logout',
         cancelButtonText: 'Batal'
     }).then((result) => {
-        if (result.isConfirmed) {
-            window.location.href = '/logout';
-        }
+        if (result.isConfirmed) window.location.href = '/logout';
     });
 };
 
 onMounted(() => {
     fetchUser();
     fetchDashboardData();
-    intervalId = setInterval(fetchDashboardData, 5000); // Polling setiap 5 detik
+    intervalId = setInterval(fetchDashboardData, 5000);
 });
 
 onUnmounted(() => {
@@ -366,122 +247,46 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-#wrapper {
-    display: flex;
-    width: 100vw;
-    min-height: 100vh;
-}
-.sidebar {
-    width: 280px;
-    background-color: #1e3a8a; 
-    color: #f8fafc;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    transition: all 0.3s;
-    z-index: 1030;
-}
-.sidebar-brand {
-    padding: 1.5rem;
-    background-color: #1e3a8a;
-    display: flex;
-    align-items: center;
-    border-bottom: 1px solid #3b82f6;
-}
-.sidebar-brand img { width: 40px; margin-right: 15px; }
-.sidebar-nav { padding: 1rem 0; flex-grow: 1; }
-.nav-item-custom {
-    padding: 0.8rem 1.5rem;
-    color: #bfdbfe;
-    display: flex;
-    align-items: center;
-    text-decoration: none;
-    transition: all 0.2s;
-    border-left: 4px solid transparent;
-}
-.nav-item-custom:hover {
-    color: #ffffff;
-    background-color: rgba(255, 255, 255, 0.1);
-}
-.nav-item-custom.active {
-    color: #ffffff;
-    background-color: rgba(255, 255, 255, 0.15);
-    border-left: 4px solid #60a5fa;
-    font-weight: 600;
-}
-.nav-item-custom i { width: 25px; font-size: 1.1rem; }
-.main-content {
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    height: 100vh;
-    overflow-y: auto;
-}
-.top-navbar {
-    background-color: #ffffff;
-    height: 70px;
-    padding: 0 2rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
-    position: sticky;
-    top: 0;
-    z-index: 1020;
-}
-.stat-card {
-    background: #fff;
-    border: none;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.03);
-    padding: 1.5rem;
-    display: flex;
-    align-items: center;
-    border-left: 5px solid #e2e8f0;
-}
-.stat-card.primary { border-left-color: #3b82f6; }
-.stat-card.success { border-left-color: #22c55e; }
-.stat-card.warning { border-left-color: #eab308; }
-.stat-card.info { border-left-color: #0ea5e9; }
-
-.stat-icon {
-    width: 50px;
-    height: 50px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.5rem;
-    margin-right: 1.2rem;
-    background-color: #f1f5f9;
-    color: #64748b;
-}
-
-.table-card {
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.03);
-    border: none;
-}
-.table-custom thead th {
-    background-color: #f8fafc;
-    color: #475569;
-    font-weight: 600;
-    border-bottom: 2px solid #e2e8f0;
-    padding: 1rem;
-}
-.table-custom tbody td {
-    padding: 1rem;
-    vertical-align: middle;
-    color: #334155;
-    border-bottom: 1px solid #f1f5f9;
-}
-
-.btn-action {
-    padding: 0.4rem 0.8rem;
-    font-size: 0.85rem;
-    border-radius: 6px;
-    font-weight: 500;
-}
+#wrapper { display: flex; width: 100vw; min-height: 100vh; background: #eef2f7; }
+.main-content { flex: 1; min-width: 0; height: 100vh; overflow-y: auto; background: #eef2f7; }
+.top-navbar { min-height: 72px; padding: 0.9rem 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; background: rgba(255,255,255,0.92); border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 1020; backdrop-filter: blur(12px); }
+.top-actions { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; justify-content: flex-end; }
+.dashboard-shell { padding: 1.5rem; }
+.summary-band { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem; border-radius: 8px; border: 1px solid #dbe4ef; background: #fff; box-shadow: 0 12px 30px rgba(15,23,42,0.04); }
+.eyebrow { color: #0f766e; font-size: 0.74rem; font-weight: 800; text-transform: uppercase; }
+.summary-band h2 { margin: 0.15rem 0; color: #0f172a; font-size: 1.55rem; font-weight: 800; letter-spacing: 0; }
+.summary-band p { margin: 0; color: #64748b; }
+.stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin: 1rem 0; }
+.stat-card { min-height: 108px; display: flex; align-items: center; gap: 0.85rem; padding: 1rem; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; box-shadow: 0 10px 24px rgba(15,23,42,0.035); }
+.stat-icon { width: 48px; height: 48px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex: 0 0 auto; }
+.stat-card span, .stat-card small { display: block; color: #64748b; font-size: 0.74rem; font-weight: 700; text-transform: uppercase; }
+.stat-card strong { display: block; color: #0f172a; font-size: 1.65rem; line-height: 1.1; margin: 0.2rem 0; }
+.stat-card small { font-weight: 600; text-transform: none; }
+.stat-card.blue .stat-icon { color: #2563eb; background: #dbeafe; }
+.stat-card.green .stat-icon { color: #15803d; background: #dcfce7; }
+.stat-card.teal .stat-icon { color: #0f766e; background: #ccfbf1; }
+.stat-card.amber .stat-icon { color: #b45309; background: #fef3c7; }
+.content-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.panel { border-radius: 8px; background: #fff; border: 1px solid #e2e8f0; box-shadow: 0 10px 24px rgba(15,23,42,0.035); padding: 1rem; min-width: 0; }
+.quick-panel { grid-column: 1 / -1; }
+.panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1rem; }
+.panel-header h6 { margin: 0; color: #0f172a; font-weight: 800; }
+.panel-header small { color: #64748b; }
+.count-pill { min-width: 34px; min-height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; font-weight: 800; }
+.count-pill.danger { color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; }
+.empty-state { display: flex; align-items: center; gap: 0.7rem; min-height: 96px; padding: 1rem; border: 1px dashed #cbd5e1; border-radius: 8px; color: #64748b; background: #f8fafc; }
+.list-stack { display: grid; gap: 0.65rem; }
+.data-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 0.75rem; align-items: center; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #fbfdff; }
+.row-icon { width: 42px; height: 42px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.row-icon.danger { color: #b91c1c; background: #fee2e2; }
+.row-icon.success { color: #15803d; background: #dcfce7; }
+.row-main { min-width: 0; display: grid; }
+.row-main strong, .row-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-main strong { color: #0f172a; }
+.row-main span { color: #64748b; font-size: 0.84rem; }
+.quick-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; }
+.quick-card { display: flex; align-items: center; gap: 0.65rem; min-height: 54px; padding: 0.8rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #334155; text-decoration: none; font-weight: 800; }
+.quick-card:hover { color: #0f766e; border-color: #99f6e4; background: #f0fdfa; }
+@media (max-width: 1100px) { .stat-grid, .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .content-grid { grid-template-columns: 1fr; } }
+@media (max-width: 768px) { #wrapper { display: block; } .main-content { height: auto; min-height: 100vh; } .top-navbar, .summary-band { flex-direction: column; align-items: stretch; } .dashboard-shell { padding: 1rem; } .stat-grid, .quick-grid { grid-template-columns: 1fr; } .data-row { grid-template-columns: 38px minmax(0, 1fr); } .data-row .btn { grid-column: 1 / -1; width: 100%; } }
 </style>
